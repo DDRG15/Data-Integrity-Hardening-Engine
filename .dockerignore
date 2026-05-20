@@ -1,0 +1,28 @@
+.git/
+.github/
+.venv/
+venv/
+env/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+dist/
+build/
+.pytest_cache/
+.coverage
+coverage.xml
+htmlcov/
+
+# Never bake secrets into the image
+.env
+
+# Output data — mounted at runtime via volume
+*.jsonl
+*.db
+*.csv
+
+# Docs and dev-only files
+docs/
+tests/
+ROADMAP.md

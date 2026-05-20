@@ -33,9 +33,9 @@ Input (raw .txt / OCR stream)
 │  Extraction Engine  │  ← regex match → structured record
 │  extraction/        │  ← audit log: total / matched / skipped
 └─────────┬───────────┘
-          │ JSONL records
+          │ structured records
           ▼
-     output.jsonl
+     output.jsonl | output.csv | output.db
 
 URL List (CSV)
           │
@@ -54,20 +54,27 @@ URL List (CSV)
 ## Quick Start
 
 ```bash
-# Install runtime dependencies
+# Install
 pip install -r requirements.txt
 pip install -e .
 
 # Extract structured records from a raw OCR text file
-python -m dih_engine.extraction.engine \
-    --input data/raw_ocr_export.txt \
-    --output output/structured_records.jsonl
+dih-engine extract --input data/raw_ocr_export.txt --output output/records.jsonl
+dih-engine extract --input data/raw_ocr_export.txt --output output/records.csv --output-format csv
+dih-engine extract --input data/raw_ocr_export.txt --output output/records.db  --output-format sqlite
 
-# Run the sanitizer as a standalone smoke test
-python -m dih_engine.sanitizer.core
+# Probe a URL list and produce a tech stack strategy plan
+dih-engine recon --input data/urls.csv --output output/recon_plan.csv
 
-# Run the recon probe against a URL list
-SEER_INPUT_CSV=data/urls.csv python -m dih_engine.recon.seer
+# Use DataSanitizer as a library in your own pipeline
+from dih_engine import DataSanitizer
+sanitizer = DataSanitizer()
+result = sanitizer.extract_data("O01234 SOME PRODUCT 14.50")
+# {'id': '001234', 'amount': '14.50', 'status': 'APPROVED'}
+
+# Docker (mounts ./data as /data inside the container)
+docker compose run --rm extract extract --input /data/raw.txt --output /data/out.jsonl
+docker compose run --rm recon recon --input /data/urls.csv --output /data/plan.csv
 
 # Run the full test suite
 pip install -r requirements-dev.txt
@@ -82,15 +89,14 @@ Copy `.env.example` to `.env` and set values before running. All parameters can 
 
 | Variable | Type | Default | Description |
 |----------|------|---------|-------------|
-| `DEE_LOG_LEVEL` | string | `INFO` | Log level for the extraction engine |
-| `DEE_PAUSE_THRESHOLD` | float | `80.0` | Memory % that triggers a GC pause |
-| `DEE_DISK_THRESHOLD` | float | `95.0` | Disk % that aborts the process |
-| `SC_LOG_LEVEL` | string | `INFO` | Log level for the sanitizer |
-| `SEER_INPUT_CSV` | string | `seer_mapa_v2.csv` | Path to URL list CSV |
-| `SEER_OUTPUT_FILE` | string | `seer_mapa_master_plan.csv` | Output path for the master plan |
-| `SEER_REQUEST_TIMEOUT` | int | `10` | HTTP timeout per probe (seconds) |
-| `SEER_SAMPLE_SIZE` | int | `3` | URLs sampled for tech stack majority vote |
-| `SEER_LOG_LEVEL` | string | `INFO` | Log level for the recon module |
+| `DEE_PAUSE_THRESHOLD` | float | `80.0` | Memory % that triggers a GC pause in the extraction engine |
+| `DEE_DISK_THRESHOLD` | float | `95.0` | Disk % that aborts the extraction process |
+| `SEER_INPUT_CSV` | string | `seer_mapa_v2.csv` | Default path to URL list CSV (overridden by `--input`) |
+| `SEER_OUTPUT_FILE` | string | `seer_mapa_master_plan.csv` | Default output path for the master plan (overridden by `--output`) |
+| `SEER_REQUEST_TIMEOUT` | int | `10` | HTTP timeout per probe in seconds (overridden by `--timeout`) |
+| `SEER_SAMPLE_SIZE` | int | `3` | URLs sampled for tech stack majority vote (overridden by `--sample-size`) |
+
+> **Logging:** This is a library — it does not configure logging internally. To enable debug output, call `logging.basicConfig(level=logging.DEBUG)` in your own script before importing.
 
 ---
 
@@ -153,7 +159,20 @@ Seer V3 probes URLs sequentially with 1–3.5s entropy delays. At 100 URLs, expe
 
 ## Changelog
 
-**V3.1 (current)**
+**V3.2 (current)**
+- Fixed HIGH: `RECORD_PATTERN` regex — `Name` was capturing `PRICE` and `Stock` content; `Price`/`Stock` output as `null`/`0`. Root cause: `[^|]+` greedy with no end anchor. Fixed with non-greedy `.+?` + `\s*$` anchor.
+- Fixed HIGH: `B→8` in `OCR_ID_FIXES` was corrupting alphanumeric IDs (`ABC-001` → `A8C-001`). Removed `B` from translation table.
+- Fixed MEDIUM: `logging.basicConfig()` called at module import in all three modules — was hijacking the root logger of any app that imported the library. Removed.
+- Fixed LOW: `pyproject.toml` build backend was `setuptools.backends.legacy:build` (nonexistent). Corrected to `setuptools.build_meta`.
+- Added: `dih-engine` CLI entry point — `extract` and `recon` commands
+- Added: `--output-format csv|sqlite` support on `extract` command
+- Added: `Dockerfile` + `docker-compose.yml`
+- Added: `.gitignore` + `.dockerignore`
+- Added: public API surface via `__init__.py` — `from dih_engine import DataSanitizer` now works
+- Added: injectable sleep in `analyze_tech_stack` — test suite no longer sleeps 1–4s per test
+- Refactored: `seer.py` module-level globals → function parameters — library-safe, testable without env mutation
+
+**V3.1**
 - Fixed CRITICAL: product name corruption (`replace("3", "e")` removed — was corrupting every name containing the digit 3)
 - Fixed CRITICAL: Windows crash on `psutil.disk_usage('/')` — now derives disk path from the input file's drive letter
 - Fixed HIGH: silent record loss — extraction engine now logs `total/matched/skipped` counts on every run

@@ -3,21 +3,63 @@ Deterministic Extraction Engine
 Processes large unstructured text files line-by-line, applies regex matching,
 and emits structured JSONL records. Designed for OCR-corrupted data streams.
 """
+import contextlib
+import csv
 import gc
 import json
 import logging
 import os
+import sqlite3
 import sys
 import time
+from typing import Callable, Generator
 
 import psutil
 
 from .patterns import OCR_ID_FIXES, RECORD_PATTERN
 
-logging.basicConfig(
-    level=os.getenv("DEE_LOG_LEVEL", "INFO").upper(),
-    format="%(asctime)s %(levelname)s %(name)s %(message)s",
-)
+_FIELDS = ["ID", "Name", "Price", "Stock"]
+
+
+@contextlib.contextmanager
+def _open_writer(
+    output_file: str, output_format: str
+) -> Generator[Callable[[dict], None], None, None]:
+    if output_format == "jsonl":
+        with open(output_file, "w", encoding="utf-8") as f:
+            yield lambda record: f.write(json.dumps(record, ensure_ascii=False) + "\n")
+
+    elif output_format == "csv":
+        with open(output_file, "w", encoding="utf-8", newline="") as f:
+            writer = csv.DictWriter(f, fieldnames=_FIELDS)
+            writer.writeheader()
+            yield writer.writerow
+
+    elif output_format == "sqlite":
+        conn = sqlite3.connect(output_file)
+        try:
+            conn.execute(
+                "CREATE TABLE IF NOT EXISTS records "
+                "(ID TEXT, Name TEXT, Price REAL, Stock INTEGER)"
+            )
+
+            def _insert(record: dict) -> None:
+                conn.execute(
+                    "INSERT INTO records VALUES (?,?,?,?)",
+                    (record["ID"], record["Name"], record["Price"], record["Stock"]),
+                )
+
+            yield _insert
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
+        finally:
+            conn.close()
+
+    else:
+        raise ValueError(f"Unsupported output_format: {output_format!r}")
+
 logger = logging.getLogger(__name__)
 
 
@@ -34,12 +76,15 @@ def bulletproof_processor(
     output_file: str,
     pause_threshold: float = 80.0,
     disk_threshold: float = 95.0,
+    output_format: str = "jsonl",
 ) -> dict:
     """
     Reads input_file line-by-line, extracts structured records via regex, and
-    writes JSONL to output_file. Returns a summary dict with record counts.
+    writes to output_file in the requested format (jsonl | csv | sqlite).
+    Returns a summary dict with record counts.
 
     Raises FileNotFoundError if input_file does not exist.
+    Raises ValueError for unsupported output_format.
     """
     if not os.path.exists(input_file):
         raise FileNotFoundError(f"Input file not found: {input_file}")
@@ -60,9 +105,9 @@ def bulletproof_processor(
     total = matched = skipped = 0
 
     try:
-        with open(input_file, "r", encoding="utf-8") as f_in, open(
-            output_file, "w", encoding="utf-8"
-        ) as f_out:
+        with open(input_file, "r", encoding="utf-8") as f_in, _open_writer(
+            output_file, output_format
+        ) as write_record:
             for i, line in enumerate(f_in):
                 total += 1
                 match = RECORD_PATTERN.search(line)
@@ -74,8 +119,7 @@ def bulletproof_processor(
 
                 data = match.groupdict()
 
-                # OCR correction: translate common character confusions in the ID field.
-                # Applied only to the ID — product names must not be mutated.
+                # OCR correction applied only to the ID — product names must not be mutated.
                 raw_id = data["id"] or ""
                 corrected_id = raw_id.translate(OCR_ID_FIXES)
 
@@ -95,7 +139,7 @@ def bulletproof_processor(
                     "Stock": int(data["stock"]) if data["stock"] else 0,
                 }
 
-                f_out.write(json.dumps(record, ensure_ascii=False) + "\n")
+                write_record(record)
                 matched += 1
 
                 if i > 0 and i % 10_000 == 0:
@@ -138,31 +182,5 @@ def bulletproof_processor(
 
 
 if __name__ == "__main__":
-    import argparse
-
-    parser = argparse.ArgumentParser(
-        description="Deterministic Extraction Engine — processes OCR text files into structured JSONL"
-    )
-    parser.add_argument("--input", required=True, help="Path to input text file")
-    parser.add_argument("--output", required=True, help="Path to output JSONL file")
-    parser.add_argument(
-        "--pause-threshold",
-        type=float,
-        default=float(os.getenv("DEE_PAUSE_THRESHOLD", "80.0")),
-        help="Memory %% at which to trigger GC pause (default: 80.0)",
-    )
-    parser.add_argument(
-        "--disk-threshold",
-        type=float,
-        default=float(os.getenv("DEE_DISK_THRESHOLD", "95.0")),
-        help="Disk %% at which to abort (default: 95.0)",
-    )
-    args = parser.parse_args()
-
-    result = bulletproof_processor(
-        args.input,
-        args.output,
-        args.pause_threshold,
-        args.disk_threshold,
-    )
-    print(result)
+    print("Use 'dih-engine extract --input <file> --output <file>' instead.", flush=True)
+    raise SystemExit(1)

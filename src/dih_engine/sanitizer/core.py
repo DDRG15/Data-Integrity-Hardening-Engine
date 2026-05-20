@@ -6,14 +6,9 @@ Logic engine to clean, sanitize, and structure raw/garbage text from OCR outputs
 Applies Zero-Trust principles and tolerance to AI/OCR hallucinations.
 """
 import logging
-import os
 import re
 from typing import Optional
 
-logging.basicConfig(
-    level=os.getenv("SC_LOG_LEVEL", "INFO").upper(),
-    format="%(asctime)s %(levelname)s %(name)s %(message)s",
-)
 logger = logging.getLogger(__name__)
 
 # Common OCR character confusions: digit↔letter swaps

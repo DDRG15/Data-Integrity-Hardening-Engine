@@ -52,6 +52,9 @@ class TestIdentifyStack:
         assert "Static HTML" in tech
 
 
+_NO_SLEEP = lambda _: None  # noqa: E731
+
+
 class TestAnalyzeTechStack:
     def test_happy_path_returns_tuple(self):
         mock_response = MagicMock()
@@ -63,7 +66,7 @@ class TestAnalyzeTechStack:
         mock_session = MagicMock()
         mock_session.get.return_value = mock_response
 
-        result = analyze_tech_stack("http://example.com", mock_session)
+        result = analyze_tech_stack("http://example.com", mock_session, _sleep_fn=_NO_SLEEP)
         assert result is not None
         tech, strategy, mines = result
         assert isinstance(tech, str)
@@ -74,14 +77,14 @@ class TestAnalyzeTechStack:
         mock_session = MagicMock()
         mock_session.get.side_effect = requests.exceptions.ConnectionError("refused")
 
-        result = analyze_tech_stack("http://example.com", mock_session)
+        result = analyze_tech_stack("http://example.com", mock_session, _sleep_fn=_NO_SLEEP)
         assert result is None
 
     def test_timeout_returns_none(self):
         mock_session = MagicMock()
         mock_session.get.side_effect = requests.exceptions.Timeout()
 
-        result = analyze_tech_stack("http://example.com", mock_session)
+        result = analyze_tech_stack("http://example.com", mock_session, _sleep_fn=_NO_SLEEP)
         assert result is None
 
     def test_keyboard_interrupt_propagates(self):
@@ -90,7 +93,7 @@ class TestAnalyzeTechStack:
         mock_session.get.side_effect = KeyboardInterrupt()
 
         with pytest.raises(KeyboardInterrupt):
-            analyze_tech_stack("http://example.com", mock_session)
+            analyze_tech_stack("http://example.com", mock_session, _sleep_fn=_NO_SLEEP)
 
 
 class TestMajorityStack:

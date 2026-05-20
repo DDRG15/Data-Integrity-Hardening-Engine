@@ -1,0 +1,19 @@
+services:
+  extract:
+    build: .
+    # Usage: docker compose run --rm extract extract --input /data/raw.txt --output /data/out.jsonl
+    # Override CMD at runtime — image entrypoint is already `dih-engine`
+    volumes:
+      - ./data:/data
+    environment:
+      DEE_PAUSE_THRESHOLD: "80.0"
+      DEE_DISK_THRESHOLD: "95.0"
+
+  recon:
+    build: .
+    # Usage: docker compose run --rm recon recon --input /data/urls.csv --output /data/plan.csv
+    volumes:
+      - ./data:/data
+    environment:
+      SEER_REQUEST_TIMEOUT: "10"
+      SEER_SAMPLE_SIZE: "3"

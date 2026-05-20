@@ -25,16 +25,7 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-logging.basicConfig(
-    level=os.getenv("SEER_LOG_LEVEL", "INFO").upper(),
-    format="%(asctime)s %(levelname)s %(name)s %(message)s",
-)
 logger = logging.getLogger(__name__)
-
-INPUT_FILE = os.getenv("SEER_INPUT_CSV", "seer_mapa_v2.csv")
-OUTPUT_FILE = os.getenv("SEER_OUTPUT_FILE", "seer_mapa_master_plan.csv")
-REQUEST_TIMEOUT = int(os.getenv("SEER_REQUEST_TIMEOUT", "10"))
-SAMPLE_SIZE = int(os.getenv("SEER_SAMPLE_SIZE", "3"))
 
 USER_AGENTS = [
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
@@ -81,17 +72,19 @@ def _identify_stack(html: str, content_type: str) -> tuple[str, str]:
 def analyze_tech_stack(
     url: str,
     session: requests.Session,
+    timeout: int = 10,
+    _sleep_fn=time.sleep,
 ) -> Optional[tuple[str, str, list[str]]]:
     """
     Probes a single URL and returns (tech_stack, strategy, gold_mines).
     Returns None on any network or HTTP failure.
+    _sleep_fn is injectable for testing — production callers use the default.
     """
     logger.info("probing url=%s", url)
-    entropy_delay = random.uniform(1.2, 3.5)
-    time.sleep(entropy_delay)
+    _sleep_fn(random.uniform(1.2, 3.5))
 
     try:
-        response = session.get(url, timeout=REQUEST_TIMEOUT)
+        response = session.get(url, timeout=timeout)
         response.raise_for_status()
         content_type = response.headers.get("Content-Type", "")
         tech, strategy = _identify_stack(response.text, content_type)
@@ -103,7 +96,7 @@ def analyze_tech_stack(
     except requests.exceptions.ConnectionError as exc:
         logger.warning("connection_error url=%s reason=%s", url, exc)
     except requests.exceptions.Timeout:
-        logger.warning("timeout url=%s threshold=%ds", url, REQUEST_TIMEOUT)
+        logger.warning("timeout url=%s threshold=%ds", url, timeout)
     except requests.exceptions.RequestException as exc:
         logger.warning("request_failed url=%s reason=%s", url, exc)
     return None
@@ -129,20 +122,30 @@ def _extract_name(row: pd.Series) -> str:
         return "Unknown Category"
 
 
-def clean_and_optimize_map() -> None:
-    logger.info("seer_v3_start input=%s", INPUT_FILE)
+def clean_and_optimize_map(
+    input_file: Optional[str] = None,
+    output_file: Optional[str] = None,
+    request_timeout: Optional[int] = None,
+    sample_size: Optional[int] = None,
+) -> None:
+    input_file = input_file or os.getenv("SEER_INPUT_CSV", "seer_mapa_v2.csv")
+    output_file = output_file or os.getenv("SEER_OUTPUT_FILE", "seer_mapa_master_plan.csv")
+    request_timeout = request_timeout or int(os.getenv("SEER_REQUEST_TIMEOUT", "10"))
+    sample_size = sample_size or int(os.getenv("SEER_SAMPLE_SIZE", "3"))
 
-    if not os.path.exists(INPUT_FILE):
-        logger.error("missing_input_file path=%s", INPUT_FILE)
-        raise FileNotFoundError(f"Input CSV not found: {INPUT_FILE}")
+    logger.info("seer_v3_start input=%s", input_file)
+
+    if not os.path.exists(input_file):
+        logger.error("missing_input_file path=%s", input_file)
+        raise FileNotFoundError(f"Input CSV not found: {input_file}")
 
     initial_disk = psutil.disk_usage(_disk_path()).percent
     if initial_disk > 95.0:
         logger.critical("disk_full disk=%.1f%% — aborting", initial_disk)
         return
 
-    logger.info("loading_csv path=%s", INPUT_FILE)
-    df = pd.read_csv(INPUT_FILE)
+    logger.info("loading_csv path=%s", input_file)
+    df = pd.read_csv(input_file)
 
     if "URL" not in df.columns:
         raise ValueError(f"CSV missing required 'URL' column. Found: {list(df.columns)}")
@@ -150,7 +153,7 @@ def clean_and_optimize_map() -> None:
     df["Nombre Categoria"] = df.apply(_extract_name, axis=1)
     df = df.drop_duplicates(subset=["URL"])
 
-    sample_urls = df["URL"].dropna().drop_duplicates().head(SAMPLE_SIZE).tolist()
+    sample_urls = df["URL"].dropna().drop_duplicates().head(sample_size).tolist()
     if not sample_urls:
         logger.error("no_urls_to_probe dataframe is empty after dedup")
         return
@@ -161,7 +164,7 @@ def clean_and_optimize_map() -> None:
     with requests.Session() as session:
         session.headers.update({"User-Agent": random.choice(USER_AGENTS)})
         for url in sample_urls:
-            result = analyze_tech_stack(url, session)
+            result = analyze_tech_stack(url, session, timeout=request_timeout)
             if result:
                 results.append(result)
 
@@ -180,8 +183,8 @@ def clean_and_optimize_map() -> None:
     print(f"   Gold Mines:    {mines[0]}")
     print("=" * 60 + "\n")
 
-    df.to_csv(OUTPUT_FILE, index=False)
-    logger.info("master_plan_saved path=%s rows=%d", OUTPUT_FILE, len(df))
+    df.to_csv(output_file, index=False)
+    logger.info("master_plan_saved path=%s rows=%d", output_file, len(df))
 
 
 if __name__ == "__main__":
