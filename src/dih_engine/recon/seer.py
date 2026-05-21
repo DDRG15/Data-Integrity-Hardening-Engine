@@ -19,6 +19,7 @@ import os
 import random
 import sys
 import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
 from typing import Optional
 
@@ -42,8 +43,8 @@ USER_AGENTS = requests_probe.USER_AGENTS
 @dataclass
 class ProbeResult:
     url: str
-    status: str  # "ok" | "http_403" | "http_429" | "http_other" | "timeout"
-                 # "connection_error" | "ssl_error" | "js_required" | "module_unavailable"
+    status: str  # "ok" | "http_401" | "http_403" | "http_429" | "http_521" | "http_other"
+                 # "timeout" | "connection_error" | "ssl_error" | "js_required" | "module_unavailable"
     tech: str = ""
     strategy: str = ""
     mines: list[str] = field(default_factory=list)
@@ -230,12 +231,21 @@ def clean_and_optimize_map(
 
     logger.info("probing_sample size=%d urls=%s", len(sample_urls), sample_urls)
 
+    # Each thread gets its own session -- requests.Session is not thread-safe.
+    def _probe(url: str) -> ProbeResult:
+        return analyze_tech_stack(url, session=None, timeout=request_timeout)
+
     all_results: list[ProbeResult] = []
-    with requests.Session() as session:
-        session.headers.update({"User-Agent": random.choice(USER_AGENTS)})
-        for url in sample_urls:
-            result = analyze_tech_stack(url, session=session, timeout=request_timeout)
-            all_results.append(result)
+    max_workers = min(10, len(sample_urls))
+    with ThreadPoolExecutor(max_workers=max_workers) as pool:
+        futures = {pool.submit(_probe, url): url for url in sample_urls}
+        for future in as_completed(futures):
+            url = futures[future]
+            try:
+                all_results.append(future.result())
+            except Exception as exc:
+                logger.error("probe_thread_failed url=%s reason=%s", url, exc)
+                all_results.append(ProbeResult(url=url, status="http_other", error_detail=str(exc)[:120]))
 
     # Attach per-URL diagnostics to every row that was probed
     status_map = {r.url: r.status for r in all_results}

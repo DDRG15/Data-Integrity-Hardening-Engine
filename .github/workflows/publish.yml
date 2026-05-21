@@ -1,0 +1,55 @@
+name: Publish to PyPI
+
+on:
+  push:
+    tags:
+      - "v*"   # triggers on: git tag v4.0.0 && git push --tags
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: pip install -e ".[tls]" pytest pytest-cov
+      - run: pytest
+
+  publish-testpypi:
+    needs: test
+    runs-on: ubuntu-latest
+    environment: testpypi
+    permissions:
+      id-token: write   # OIDC trusted publishing (no token needed if configured)
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: pip install build
+      - run: python -m build
+      - uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          repository-url: https://test.pypi.org/legacy/
+          # Uses OIDC trusted publishing -- set up at test.pypi.org/manage/project/dih-engine/settings/
+          # Fallback: add secret TEST_PYPI_API_TOKEN and uncomment:
+          # password: ${{ secrets.TEST_PYPI_API_TOKEN }}
+
+  publish-pypi:
+    needs: publish-testpypi
+    runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: pip install build
+      - run: python -m build
+      - uses: pypa/gh-action-pypi-publish@release/v1
+        # Uses OIDC trusted publishing -- set up at pypi.org/manage/project/dih-engine/settings/
+        # Fallback: add secret PYPI_API_TOKEN and uncomment:
+        # password: ${{ secrets.PYPI_API_TOKEN }}

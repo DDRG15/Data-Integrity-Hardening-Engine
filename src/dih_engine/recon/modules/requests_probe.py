@@ -59,10 +59,14 @@ def probe(
     except requests.exceptions.HTTPError as exc:
         code = exc.response.status_code
         logger.warning("http_error url=%s status=%d", url, code)
+        if code == 401:
+            return {"status": "http_401", "html": "", "content_type": "", "error_detail": "HTTP 401 Unauthorized -- site requires authentication (terminal)"}
         if code == 403:
             return {"status": "http_403", "html": "", "content_type": "", "error_detail": "HTTP 403 Forbidden -- likely WAF or geo-block"}
         if code == 429:
             return {"status": "http_429", "html": "", "content_type": "", "error_detail": "HTTP 429 Rate Limited"}
+        if code == 521:
+            return {"status": "http_521", "html": "", "content_type": "", "error_detail": "HTTP 521 Web Server Down -- Cloudflare origin unreachable"}
         return {"status": "http_other", "html": "", "content_type": "", "error_detail": f"HTTP {code}"}
 
     except requests.exceptions.SSLError as exc:

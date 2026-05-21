@@ -97,6 +97,18 @@ class TestBuildProbeResult:
         result = _build_probe_result("http://example.com", fetch)
         assert result.fallback_module == ""
 
+    def test_401_is_terminal_no_fallback(self):
+        fetch = {"status": "http_401", "html": "", "content_type": "", "error_detail": "HTTP 401 Unauthorized"}
+        result = _build_probe_result("http://example.com", fetch)
+        assert result.status == "http_401"
+        assert result.fallback_module == ""
+
+    def test_521_maps_to_curl_cffi_fallback(self):
+        fetch = {"status": "http_521", "html": "", "content_type": "", "error_detail": "HTTP 521 Web Server Down"}
+        result = _build_probe_result("http://example.com", fetch)
+        assert result.status == "http_521"
+        assert result.fallback_module == "curl_cffi"
+
 
 class TestAnalyzeTechStack:
     def test_happy_path_returns_ok_probe_result(self):
@@ -150,6 +162,26 @@ class TestAnalyzeTechStack:
         assert isinstance(result, ProbeResult)
         assert result.status == "http_403"
         assert result.fallback_module == "curl_cffi"
+
+    def test_401_is_terminal_not_retried(self):
+        http_error = requests.exceptions.HTTPError(response=MagicMock(status_code=401))
+        mock_session = MagicMock()
+        mock_session.get.side_effect = http_error
+
+        result = analyze_tech_stack("http://example.com", mock_session, _sleep_fn=_NO_SLEEP)
+        assert result.status == "http_401"
+        assert result.fallback_module == ""
+
+    def test_521_triggers_curl_cffi_fallback(self):
+        http_error = requests.exceptions.HTTPError(response=MagicMock(status_code=521))
+        mock_session = MagicMock()
+        mock_session.get.side_effect = http_error
+
+        curlffi_ok = {"status": "ok", "html": "<html><body>Rescued by curl_cffi</body></html>", "content_type": "text/html", "error_detail": ""}
+        with patch("src.dih_engine.recon.seer.curlffi_probe.probe", return_value=curlffi_ok):
+            result = analyze_tech_stack("http://example.com", mock_session, _sleep_fn=_NO_SLEEP)
+        assert result.status == "ok"
+        assert result.tech == "Static HTML"
 
     def test_keyboard_interrupt_propagates(self):
         # KeyboardInterrupt must NOT be swallowed -- regression for bare except: removal
