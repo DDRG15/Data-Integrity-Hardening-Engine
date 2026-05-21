@@ -122,8 +122,14 @@ requests -> connection_error -> terminal (sin fallback)
 - 55 tests verdes (6 nuevos para proxy_probe)
 - `test_proxy_is_third_fallback_after_curlffi` verifica el encadenamiento completo
 
-### Para activar proxy en el próximo live test
-1. Registrarse en https://scrapfly.io (free tier: 1,000 requests/mes)
-2. Agregar `SCRAPFLY_API_KEY=scp-live-...` al `.env`
-3. Correr: `dih-engine recon --input data/urls_test.csv --output data/plan_proxy.csv --sample-size 10`
+### Para activar FlareSolverr en el próximo live test (sin cuenta)
+1. `docker compose up -d flaresolverr` (descarga la imagen la primera vez, ~200MB)
+2. Agregar `FLARE_SOLVER_URL=http://localhost:8191/v1` al `.env`
+3. Correr: `dih-engine recon --input data/urls_test.csv --output data/plan_flare.csv --sample-size 10`
 4. Verificar que stackoverflow.com, etsy.com, centauro.com.br ahora dicen `ok`
+
+### Chain completo implementado
+```
+requests -> 403/ssl -> curl_cffi -> aún 403 -> flaresolverr -> aún 403 -> proxy_probe
+```
+Cada módulo se activa solo si está configurado. Sin config = `module_unavailable` en CSV.

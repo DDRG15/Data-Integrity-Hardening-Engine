@@ -4,6 +4,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 import requests
 
+from src.dih_engine.recon.modules.flaresolverr_probe import probe as flaresolverr_probe
 from src.dih_engine.recon.modules.proxy_probe import _via_generic_proxy, _via_scrapfly, probe as proxy_probe
 from src.dih_engine.recon.seer import (
     ProbeResult,
@@ -140,8 +141,10 @@ class TestAnalyzeTechStack:
 
         # Simulate curl_cffi also blocked (persistent WAF) so proxy is tried next
         curlffi_blocked = {"status": "http_403", "html": "", "content_type": "", "error_detail": "HTTP 403"}
+        fs_blocked = {"status": "module_unavailable", "html": "", "content_type": "", "error_detail": "not configured"}
         proxy_blocked = {"status": "module_unavailable", "html": "", "content_type": "", "error_detail": "no proxy configured"}
         with patch("src.dih_engine.recon.seer.curlffi_probe.probe", return_value=curlffi_blocked), \
+             patch("src.dih_engine.recon.seer.flaresolverr_probe.probe", return_value=fs_blocked), \
              patch("src.dih_engine.recon.seer.proxy_probe.probe", return_value=proxy_blocked):
             result = analyze_tech_stack("http://example.com", mock_session, _sleep_fn=_NO_SLEEP)
         assert isinstance(result, ProbeResult)
@@ -186,6 +189,52 @@ class TestLocateGoldMines:
     def test_returns_fallback_for_sparse_html(self):
         mines = locate_gold_mines("<html><body><p>Hello</p></body></html>")
         assert "No obvious" in mines[0]
+
+
+class TestFlareSolverrProbe:
+    def test_no_config_returns_module_unavailable(self, monkeypatch):
+        monkeypatch.delenv("FLARE_SOLVER_URL", raising=False)
+        result = flaresolverr_probe("http://example.com")
+        assert result["status"] == "module_unavailable"
+        assert "FLARE_SOLVER_URL" in result["error_detail"]
+
+    def test_success_returns_ok(self, monkeypatch):
+        monkeypatch.setenv("FLARE_SOLVER_URL", "http://localhost:8191/v1")
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.raise_for_status = MagicMock()
+        mock_response.json.return_value = {
+            "status": "ok",
+            "solution": {"status": 200, "response": "<html><body>Solved page</body></html>"},
+        }
+        with patch("src.dih_engine.recon.modules.flaresolverr_probe.requests.post", return_value=mock_response):
+            result = flaresolverr_probe("http://example.com", timeout=10)
+        assert result["status"] == "ok"
+        assert "Solved" in result["html"]
+
+    def test_container_not_running_returns_unavailable(self, monkeypatch):
+        monkeypatch.setenv("FLARE_SOLVER_URL", "http://localhost:8191/v1")
+        with patch(
+            "src.dih_engine.recon.modules.flaresolverr_probe.requests.post",
+            side_effect=requests.exceptions.ConnectionError("refused"),
+        ):
+            result = flaresolverr_probe("http://example.com", timeout=10)
+        assert result["status"] == "module_unavailable"
+        assert "docker" in result["error_detail"].lower()
+
+    def test_flaresolverr_challenge_failed_returns_error(self, monkeypatch):
+        monkeypatch.setenv("FLARE_SOLVER_URL", "http://localhost:8191/v1")
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.raise_for_status = MagicMock()
+        mock_response.json.return_value = {
+            "status": "error",
+            "message": "Challenge not solved within timeout",
+        }
+        with patch("src.dih_engine.recon.modules.flaresolverr_probe.requests.post", return_value=mock_response):
+            result = flaresolverr_probe("http://example.com", timeout=10)
+        assert result["status"] == "http_other"
+        assert "Challenge" in result["error_detail"]
 
 
 class TestProxyProbe:
@@ -250,7 +299,7 @@ class TestProxyProbe:
         assert result["status"] == "http_other"
         assert "empty" in result["error_detail"]
 
-    def test_proxy_is_third_fallback_after_curlffi(self, monkeypatch):
+    def test_full_chain_error_detail_has_all_three_layers(self, monkeypatch):
         # When requests AND curl_cffi both 403, proxy should be attempted third
         monkeypatch.delenv("DIH_PROXY_URL", raising=False)
         monkeypatch.delenv("SCRAPFLY_API_KEY", raising=False)
@@ -260,11 +309,14 @@ class TestProxyProbe:
         mock_session.get.side_effect = http_error
 
         curlffi_blocked = {"status": "http_403", "html": "", "content_type": "", "error_detail": "HTTP 403"}
+        fs_blocked = {"status": "module_unavailable", "html": "", "content_type": "", "error_detail": "FlareSolverr not configured"}
         proxy_blocked = {"status": "module_unavailable", "html": "", "content_type": "", "error_detail": "no proxy configured"}
         with patch("src.dih_engine.recon.seer.curlffi_probe.probe", return_value=curlffi_blocked), \
+             patch("src.dih_engine.recon.seer.flaresolverr_probe.probe", return_value=fs_blocked), \
              patch("src.dih_engine.recon.seer.proxy_probe.probe", return_value=proxy_blocked):
             result = analyze_tech_stack("http://example.com", mock_session, _sleep_fn=_NO_SLEEP)
 
-        # All three layers failed -- error_detail must mention both fallback attempts
+        # All four layers failed -- error_detail must document all three fallback attempts
         assert "curl_cffi" in result.error_detail
+        assert "flaresolverr" in result.error_detail
         assert "proxy" in result.error_detail

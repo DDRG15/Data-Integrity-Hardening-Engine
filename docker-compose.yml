@@ -17,3 +17,13 @@ services:
     environment:
       SEER_REQUEST_TIMEOUT: "10"
       SEER_SAMPLE_SIZE: "3"
+
+  flaresolverr:
+    image: ghcr.io/flaresolverr/flaresolverr:latest
+    # Usage: docker compose up -d flaresolverr
+    # Then set FLARE_SOLVER_URL=http://localhost:8191/v1 in .env
+    ports:
+      - "8191:8191"
+    environment:
+      LOG_LEVEL: "info"
+    restart: unless-stopped

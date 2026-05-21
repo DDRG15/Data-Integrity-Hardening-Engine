@@ -100,8 +100,8 @@ When a probe fails, the error is classified and the appropriate fallback module 
 
 | Error code | Cause | Fallback module |
 |------------|-------|-----------------|
-| `http_403` | WAF / Cloudflare block | `curl_cffi` -> `proxy` (two-stage) |
-| `ssl_error` | TLS handshake mismatch | `curl_cffi` -> `proxy` (two-stage) |
+| `http_403` | WAF / Cloudflare block | `curl_cffi` -> `flaresolverr` -> `proxy` |
+| `ssl_error` | TLS handshake mismatch | `curl_cffi` -> `flaresolverr` -> `proxy` |
 | `http_429` | Rate limited | `delay_retry` (10-12s backoff + retry) |
 | `timeout` | Slow site | `delay_retry` |
 | `js_required` | CSR-only page (empty body) | `playwright` (headless browser) |
@@ -115,6 +115,20 @@ Real-world results from a 100-URL live test (2026-05-21):
 - **2 timeout** -- delay_retry resolved both
 - **1 ssl_error** -- expired server cert (terminal, correctly buried)
 - **1 connection_error** -- DNS failure (terminal)
+
+### FlareSolverr (second-level fallback, no account needed)
+
+Self-hosted Cloudflare challenge solver. Runs a real Chrome in Docker.
+
+```bash
+# Start once (add to docker-compose is already done):
+docker compose up -d flaresolverr
+
+# Add to .env:
+FLARE_SOLVER_URL=http://localhost:8191/v1
+```
+
+FlareSolverr activates automatically after curl_cffi fails. No registration required.
 
 ### Proxy rotation (third-level fallback)
 When `curl_cffi` also fails on a 403, `proxy_probe` is tried automatically.
@@ -198,8 +212,8 @@ tests/
 **Persistent WAF blocks (Seer V4)**
 Sites with advanced bot protection (Akamai Enterprise, Cloudflare Pro) block both
 `requests` and `curl_cffi`. Live test confirmed: stackoverflow.com, etsy.com, centauro.com.br.
-`proxy_probe` is wired as the third fallback -- configure `DIH_PROXY_URL` or `SCRAPFLY_API_KEY`
-in `.env` to activate it.
+Full chain: `curl_cffi` -> `flaresolverr` (start with `docker compose up -d flaresolverr`)
+-> `proxy` (set `DIH_PROXY_URL` or `SCRAPFLY_API_KEY`). Each step activates only if configured.
 
 **Expired server certificates**
 `ssl_error` where the remote server has an expired cert (e.g. tricae.com.br) is terminal --

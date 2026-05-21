@@ -30,7 +30,7 @@ from dotenv import load_dotenv
 
 from ..notifications import notify_all
 from .error_taxonomy import FALLBACK_MAP
-from .modules import curlffi_probe, playwright_probe, proxy_probe, requests_probe
+from .modules import curlffi_probe, flaresolverr_probe, playwright_probe, proxy_probe, requests_probe
 
 load_dotenv()
 
@@ -132,8 +132,16 @@ def analyze_tech_stack(
                 logger.info("fallback_success url=%s module=curl_cffi", url)
                 return fb
             result.error_detail += f" | curl_cffi: {fb.error_detail}"
-            # Second-level fallback: proxy rotation when curl_cffi also blocked
-            logger.info("fallback_triggered url=%s status=%s module=proxy", url, fb.status)
+            # Second-level: FlareSolverr (self-hosted Cloudflare solver, no account needed)
+            logger.info("fallback_triggered url=%s status=%s module=flaresolverr", url, fb.status)
+            fs_fetch = flaresolverr_probe.probe(url, timeout=timeout)
+            fs = _build_probe_result(url, fs_fetch)
+            if fs.status == "ok":
+                logger.info("fallback_success url=%s module=flaresolverr", url)
+                return fs
+            result.error_detail += f" | flaresolverr: {fs.error_detail}"
+            # Third-level: proxy rotation (generic HTTP/SOCKS5 or Scrapfly)
+            logger.info("fallback_triggered url=%s status=%s module=proxy", url, fs.status)
             px_fetch = proxy_probe.probe(url, timeout=timeout)
             px = _build_probe_result(url, px_fetch)
             if px.status == "ok":
