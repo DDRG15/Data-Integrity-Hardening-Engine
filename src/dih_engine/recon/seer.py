@@ -52,7 +52,7 @@ def locate_gold_mines(html: str) -> list[str]:
     for tag in ["article", "li", "div"]:
         count = len(soup.find_all(tag))
         if count > 10:
-            mines.append(f"Found {count} <{tag}> elements — high probability data payload.")
+            mines.append(f"Found {count} <{tag}> elements -- high probability data payload.")
     return mines if mines else ["No obvious structural arrays found."]
 
 
@@ -66,6 +66,8 @@ def _identify_stack(html: str, content_type: str) -> tuple[str, str]:
         return "React.js (CSR)", "Selenium with dynamic waits"
     if "vtex.cmc" in html or "vtex-" in html:
         return "VTEX Commerce", "requests if API exposed, else Selenium"
+    if "squarespace" in html.lower() or "static1.squarespace.com" in html:
+        return "Squarespace", "BeautifulSoup -- SSR HTML, structure varies by template"
     return "Static HTML", "BeautifulSoup -- fast and direct"
 
 
@@ -108,7 +110,7 @@ def _majority_stack(results: list[tuple[str, str, list[str]]]) -> tuple[str, str
     majority = max(set(stacks), key=stacks.count)
     if stacks.count(majority) < len(stacks) / 2:
         logger.warning(
-            "no_majority_stack detections=%s — using most frequent: %s", stacks, majority
+            "no_majority_stack detections=%s -- using most frequent: %s", stacks, majority
         )
     return next(r for r in results if r[0] == majority)
 
@@ -141,7 +143,7 @@ def clean_and_optimize_map(
 
     initial_disk = psutil.disk_usage(_disk_path()).percent
     if initial_disk > 95.0:
-        logger.critical("disk_full disk=%.1f%% — aborting", initial_disk)
+        logger.critical("disk_full disk=%.1f%% -- aborting", initial_disk)
         return
 
     logger.info("loading_csv path=%s", input_file)

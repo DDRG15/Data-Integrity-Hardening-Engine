@@ -96,7 +96,7 @@ def bulletproof_processor(
     initial_disk = psutil.disk_usage(disk_path).percent
     if initial_disk > disk_threshold:
         logger.critical(
-            "disk_full disk=%.1f%% threshold=%.1f%% — aborting before corrupting output",
+            "disk_full disk=%.1f%% threshold=%.1f%% --aborting before corrupting output",
             initial_disk,
             disk_threshold,
         )
@@ -119,7 +119,7 @@ def bulletproof_processor(
 
                 data = match.groupdict()
 
-                # OCR correction applied only to the ID — product names must not be mutated.
+                # OCR correction applied only to the ID --product names must not be mutated.
                 raw_id = data["id"] or ""
                 corrected_id = raw_id.translate(OCR_ID_FIXES)
 
@@ -129,7 +129,7 @@ def bulletproof_processor(
                         price = float(data["price"].replace(",", "."))
                     except ValueError:
                         logger.warning(
-                            "line=%d unparseable price=%r — stored as null", i + 1, data["price"]
+                            "line=%d unparseable price=%r --stored as null", i + 1, data["price"]
                         )
 
                 record = {
@@ -148,7 +148,7 @@ def bulletproof_processor(
 
                     if disk_now > disk_threshold:
                         logger.critical(
-                            "disk_full line=%d disk=%.1f%% — stopping to prevent corruption",
+                            "disk_full line=%d disk=%.1f%% --stopping to prevent corruption",
                             i + 1,
                             disk_now,
                         )
@@ -156,7 +156,7 @@ def bulletproof_processor(
 
                     if mem_now > pause_threshold:
                         logger.warning(
-                            "memory_pressure line=%d mem=%.1f%% — collecting garbage",
+                            "memory_pressure line=%d mem=%.1f%% --collecting garbage",
                             i + 1,
                             mem_now,
                         )

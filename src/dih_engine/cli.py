@@ -4,11 +4,19 @@ import sys
 
 from .extraction import bulletproof_processor
 
+# Force UTF-8 on stdout/stderr at the CLI entry point.
+# Without this, Windows consoles running cp1252 crash on any non-ASCII character
+# (em dashes, arrows, accented letters) printed anywhere in the process.
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+if hasattr(sys.stderr, "reconfigure"):
+    sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+
 
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="dih-engine",
-        description="Data Integrity Hardening Engine — OCR extraction and sanitization",
+        description="Data Integrity Hardening Engine -- OCR extraction and sanitization",
     )
     subparsers = parser.add_subparsers(dest="command", required=True)
 
@@ -79,7 +87,7 @@ def main() -> None:
             sys.exit(1)
 
         if result.get("aborted"):
-            print("error: extraction aborted — disk full before completion", file=sys.stderr)
+            print("error: extraction aborted -- disk full before completion", file=sys.stderr)
             sys.exit(2)
 
         print(
