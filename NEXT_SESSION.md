@@ -73,3 +73,31 @@ O agregar el workflow de CI para que publique automáticamente en cada tag:
 - **PyPI** — pendiente de decisión.
 - **Slack template** — el usuario mencionó que quiere un template de notificaciones Slack
   para el proyecto (no está activo, solo como placeholder).
+
+---
+
+## [2026-05-21] curl_cffi instalado + live test completo de 100 URLs
+
+### Resultados del live test (data/plan_test_full.csv)
+```
+87 ok              -- éxito directo
+ 6 http_403        -- WAF block; curl_cffi rescató 3 (riachuelo, codepen, behance)
+ 3 http_other      -- errores HTTP varios
+ 2 timeout         -- delay_retry resolvió ambos (canva rescatada con 429 -> retry ok)
+ 1 ssl_error       -- tricae.com.br: cert expirado en el servidor (terminal, sin solución)
+ 1 connection_error -- fallo DNS (terminal)
+```
+
+### Sitios que necesitan el próximo módulo (proxy_probe.py)
+- stackoverflow.com  -- Cloudflare Enterprise, bloquea requests y curl_cffi
+- centauro.com.br    -- WAF persistente
+- etsy.com           -- bot protection avanzada
+
+### Notificaciones
+- Slack + Discord ambos funcionando (200 / 204)
+- Webhooks guardados en .env (gitignored)
+
+### Pendiente
+- **proxy_probe.py** -- módulo de rotación de proxies (Scrapfly/ZenRows/Oxylabs)
+- **Push a GitHub** -- 9 commits locales sin subir
+- **PyPI** -- pendiente de decisión
