@@ -100,20 +100,24 @@ When a probe fails, the error is classified and the appropriate fallback module 
 
 | Error code | Cause | Fallback module |
 |------------|-------|-----------------|
+| `http_401` | Site requires authentication (paid API, login wall) | terminal -- no fallback resolves missing credentials |
 | `http_403` | WAF / Cloudflare block | `curl_cffi` -> `flaresolverr` -> `proxy` |
-| `ssl_error` | TLS handshake mismatch | `curl_cffi` -> `flaresolverr` -> `proxy` |
 | `http_429` | Rate limited | `delay_retry` (10-12s backoff + retry) |
+| `http_521` | Cloudflare origin server down | `curl_cffi` (sometimes bypasses) |
+| `ssl_error` | TLS handshake mismatch | `curl_cffi` -> `flaresolverr` -> `proxy` |
 | `timeout` | Slow site | `delay_retry` |
 | `js_required` | CSR-only page (empty body) | `playwright` (headless browser) |
 | `connection_error` | DNS failure | terminal -- documented in CSV, no retry |
 
 The output CSV gains three columns per probed URL: `Status`, `Error_Detail`, `Fallback_Module`.
 
-Real-world results from a 100-URL live test (2026-05-21):
-- **87 ok** -- direct success
-- **6 http_403** -- WAF blocks; curl_cffi rescued 3, 3 remain (proxy needed)
-- **2 timeout** -- delay_retry resolved both
+Real-world results from a 101-URL live test (2026-05-21, parallel probing):
+- **91 ok** -- direct success
+- **3 http_other** -- reqres.in + reuters.com went paid (401), chilli.com.br 521
+- **2 http_403** -- centauro.com.br, etsy.com (chain exhausted, proxy needed)
+- **2 timeout** -- asos.com (retry → 403), bestbuy.com (retry → timeout)
 - **1 ssl_error** -- expired server cert (terminal, correctly buried)
+- **1 connection_error** -- DNS failure (terminal)
 - **1 connection_error** -- DNS failure (terminal)
 
 ### FlareSolverr (second-level fallback, no account needed)
@@ -224,9 +228,10 @@ and should be removed from the URL list.
 Amount normalization handles `14,50` -> `14.50` but not `1.234,50` (period-as-thousands,
 comma-as-decimal). Resolution: locale detection before normalization.
 
-**Synchronous Recon**
-Seer V4 probes URLs sequentially. At 100 URLs, expect 4-8 minutes. Resolution: async
-probe via `aiohttp` (see ROADMAP.md).
+**Parallel Recon (10 workers)**
+Seer V4 probes up to 10 URLs concurrently via `ThreadPoolExecutor`. At 100 URLs, expect
+~1 minute. Aggressive WAF sites may 429 more readily under concurrent load -- `delay_retry`
+handles this automatically. Future: `aiohttp` for true async I/O.
 
 ---
 
@@ -235,13 +240,20 @@ probe via `aiohttp` (see ROADMAP.md).
 **V4.0 (current)**
 - Added: `ProbeResult` dataclass replaces raw tuples -- every URL gets a typed result
 - Added: error taxonomy (`error_taxonomy.py`) -- maps failure codes to fallback modules
-- Added: modular fallback chain -- `requests` -> `curl_cffi` -> `playwright` or `delay_retry`
+- Added: modular fallback chain -- `requests` -> `curl_cffi` -> `flaresolverr` -> `proxy`
+- Added: `http_401` error code -- terminal, no fallback (site requires credentials)
+- Added: `http_521` error code -- Cloudflare origin down, routes to `curl_cffi`
 - Added: `Status`, `Error_Detail`, `Fallback_Module` columns in output CSV
-- Added: Intelligence Report probe breakdown (e.g. "87 ok, 6 http_403, 2 timeout")
+- Added: Intelligence Report probe breakdown (e.g. "91 ok, 3 http_other, 2 http_403")
 - Added: Slack notifier -- Block Kit formatted report after each recon run
 - Added: Discord notifier -- rich embed with color-coded status after each recon run
+- Added: FlareSolverr probe -- self-hosted Cloudflare JS solver, no account needed
+- Added: proxy_probe -- generic HTTP/SOCKS5 or Scrapfly as third-level fallback
+- Added: parallel probing via `ThreadPoolExecutor(max_workers=10)` -- ~8x faster on 100 URLs
 - Added: `[tls]`, `[browser]`, `[proxy]`, `[full]` optional extras in `pyproject.toml`
-- Live tested: 100 URLs; curl_cffi rescued 3 WAF-blocked sites; delay_retry resolved both 429s
+- Added: `publish.yml` GitHub Actions workflow -- auto-publishes to PyPI on git tag push
+- Published: `dih-engine 4.0.0` to TestPyPI -- verified installable
+- Live tested: 101 URLs; 91 ok; curl_cffi rescued WAF blocks; delay_retry resolved rate limits
 
 **V3.2**
 - Fixed HIGH: `RECORD_PATTERN` regex -- `Name` was capturing `PRICE` and `Stock` content. Fixed with non-greedy `.+?` + `\s*$` anchor.

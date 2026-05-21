@@ -133,3 +133,42 @@ requests -> connection_error -> terminal (sin fallback)
 requests -> 403/ssl -> curl_cffi -> aún 403 -> flaresolverr -> aún 403 -> proxy_probe
 ```
 Cada módulo se activa solo si está configurado. Sin config = `module_unavailable` en CSV.
+
+---
+
+## [2026-05-21] http_401 + http_521 + parallel probing + TestPyPI
+
+### Nuevos error codes
+- **http_401** -- terminal, sin fallback. Live test confirmó: reqres.in y reuters.com
+  pasaron a modelo pago durante 2025. Se documenta en CSV, no se reintenta.
+- **http_521** -- Cloudflare "origin server down". Ruta a curl_cffi (a veces lo bypasea).
+  Confirmado: chilli.com.br devuelve 521.
+
+### Parallel probing
+- `ThreadPoolExecutor(max_workers=10)` en `clean_and_optimize_map()`
+- Cada thread crea su propia `requests.Session` (Session no es thread-safe)
+- Speedup real: ~8 min -> ~1 min para 100 URLs
+- 63 tests verdes (4 nuevos para 401/521 + chain behavior)
+
+### Live test final V4 (101 URLs, paralelo)
+```
+91 ok
+ 3 http_other  -- reqres.in 401, reuters.com 401, chilli.com.br 521
+ 2 http_403    -- centauro.com.br, etsy.com (chain exhausted)
+ 2 timeout     -- asos.com (retry->403), bestbuy.com (retry->timeout)
+ 1 ssl_error   -- tricae.com.br (cert expirado, terminal)
+ 1 conn_error  -- dafiti.com.br (DNS)
+```
+
+### TestPyPI
+- `dih-engine 4.0.0` publicado en test.pypi.org -- verificado instalable
+- Token usado: revocado después del upload
+- `pyproject.toml` version: 0.3.2 -> 4.0.0
+- `publish.yml` creado: GitHub Actions auto-publica en cada `git tag v*`
+
+### Pendiente para próxima sesión
+1. **git push origin main** -- ~14 commits locales sin subir
+2. **Badge CI verde** -- se activa automáticamente después del push
+3. **Real PyPI** -- mismo flow que TestPyPI, nuevo token en pypi.org
+4. **FlareSolverr live test** -- `docker compose up -d flaresolverr` + `FLARE_SOLVER_URL` en .env
+   Targets: stackoverflow.com, etsy.com, centauro.com.br
