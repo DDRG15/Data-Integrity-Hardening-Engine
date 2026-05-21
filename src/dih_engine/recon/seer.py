@@ -28,6 +28,7 @@ import requests
 from bs4 import BeautifulSoup
 from dotenv import load_dotenv
 
+from ..notifications import notify_all
 from .error_taxonomy import FALLBACK_MAP
 from .modules import curlffi_probe, playwright_probe, requests_probe
 
@@ -268,6 +269,15 @@ def clean_and_optimize_map(
     print(f"   Probe summary:   {summary_str}")
     print(f"   Fallback needed: {fallback_str}")
     print("=" * 60 + "\n")
+
+    notify_all(
+        tech=winner.tech,
+        strategy=winner.strategy,
+        gold_mine=winner.mines[0] if winner.mines else "n/a",
+        status_counts=status_counts,
+        fallback_counts=fallback_counts,
+        output_file=output_file,
+    )
 
     df.to_csv(output_file, index=False)
     logger.info("master_plan_saved path=%s rows=%d", output_file, len(df))
