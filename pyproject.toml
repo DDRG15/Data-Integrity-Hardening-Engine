@@ -20,7 +20,8 @@ dependencies = [
 [project.optional-dependencies]
 tls     = ["curl-cffi>=0.6"]
 browser = ["playwright>=1.40"]
-full    = ["curl-cffi>=0.6", "playwright>=1.40"]
+proxy   = ["requests[socks]"]
+full    = ["curl-cffi>=0.6", "playwright>=1.40", "requests[socks]"]
 
 [project.scripts]
 dih-engine = "dih_engine.cli:main"

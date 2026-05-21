@@ -4,6 +4,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 import requests
 
+from src.dih_engine.recon.modules.proxy_probe import _via_generic_proxy, _via_scrapfly, probe as proxy_probe
 from src.dih_engine.recon.seer import (
     ProbeResult,
     _build_probe_result,
@@ -137,8 +138,12 @@ class TestAnalyzeTechStack:
         mock_session = MagicMock()
         mock_session.get.side_effect = http_error
 
-        # curl_cffi is not installed in test env -- fallback returns module_unavailable
-        result = analyze_tech_stack("http://example.com", mock_session, _sleep_fn=_NO_SLEEP)
+        # Simulate curl_cffi also blocked (persistent WAF) so proxy is tried next
+        curlffi_blocked = {"status": "http_403", "html": "", "content_type": "", "error_detail": "HTTP 403"}
+        proxy_blocked = {"status": "module_unavailable", "html": "", "content_type": "", "error_detail": "no proxy configured"}
+        with patch("src.dih_engine.recon.seer.curlffi_probe.probe", return_value=curlffi_blocked), \
+             patch("src.dih_engine.recon.seer.proxy_probe.probe", return_value=proxy_blocked):
+            result = analyze_tech_stack("http://example.com", mock_session, _sleep_fn=_NO_SLEEP)
         assert isinstance(result, ProbeResult)
         assert result.status == "http_403"
         assert result.fallback_module == "curl_cffi"
@@ -181,3 +186,85 @@ class TestLocateGoldMines:
     def test_returns_fallback_for_sparse_html(self):
         mines = locate_gold_mines("<html><body><p>Hello</p></body></html>")
         assert "No obvious" in mines[0]
+
+
+class TestProxyProbe:
+    def test_no_config_returns_module_unavailable(self, monkeypatch):
+        monkeypatch.delenv("DIH_PROXY_URL", raising=False)
+        monkeypatch.delenv("SCRAPFLY_API_KEY", raising=False)
+        result = proxy_probe("http://example.com")
+        assert result["status"] == "module_unavailable"
+        assert "DIH_PROXY_URL" in result["error_detail"]
+
+    def test_generic_proxy_success(self, monkeypatch):
+        monkeypatch.setenv("DIH_PROXY_URL", "http://proxy.example.com:8080")
+        monkeypatch.delenv("SCRAPFLY_API_KEY", raising=False)
+
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.text = "<html><body>Rescued page</body></html>"
+        mock_response.headers = {"Content-Type": "text/html"}
+        mock_response.raise_for_status = MagicMock()
+
+        with patch("src.dih_engine.recon.modules.proxy_probe.requests.get", return_value=mock_response):
+            result = _via_generic_proxy("http://example.com", "http://proxy.example.com:8080", timeout=10)
+
+        assert result["status"] == "ok"
+        assert "Rescued" in result["html"]
+
+    def test_generic_proxy_403_returns_error(self, monkeypatch):
+        http_error = requests.exceptions.HTTPError(response=MagicMock(status_code=403))
+        with patch("src.dih_engine.recon.modules.proxy_probe.requests.get", side_effect=http_error):
+            result = _via_generic_proxy("http://example.com", "http://proxy.example.com:8080", timeout=10)
+        assert result["status"] == "http_403"
+
+    def test_scrapfly_success(self, monkeypatch):
+        monkeypatch.delenv("DIH_PROXY_URL", raising=False)
+        monkeypatch.setenv("SCRAPFLY_API_KEY", "scp-test-key")
+
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.raise_for_status = MagicMock()
+        mock_response.json.return_value = {
+            "result": {
+                "content": "<html><body>Scrapfly page</body></html>",
+                "response_headers": {"content-type": "text/html"},
+            }
+        }
+
+        with patch("src.dih_engine.recon.modules.proxy_probe.requests.get", return_value=mock_response):
+            result = _via_scrapfly("http://example.com", "scp-test-key", timeout=10)
+
+        assert result["status"] == "ok"
+        assert "Scrapfly" in result["html"]
+
+    def test_scrapfly_empty_content_returns_error(self):
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.raise_for_status = MagicMock()
+        mock_response.json.return_value = {"result": {"content": "", "response_headers": {}}}
+
+        with patch("src.dih_engine.recon.modules.proxy_probe.requests.get", return_value=mock_response):
+            result = _via_scrapfly("http://example.com", "scp-test-key", timeout=10)
+
+        assert result["status"] == "http_other"
+        assert "empty" in result["error_detail"]
+
+    def test_proxy_is_third_fallback_after_curlffi(self, monkeypatch):
+        # When requests AND curl_cffi both 403, proxy should be attempted third
+        monkeypatch.delenv("DIH_PROXY_URL", raising=False)
+        monkeypatch.delenv("SCRAPFLY_API_KEY", raising=False)
+
+        http_error = requests.exceptions.HTTPError(response=MagicMock(status_code=403))
+        mock_session = MagicMock()
+        mock_session.get.side_effect = http_error
+
+        curlffi_blocked = {"status": "http_403", "html": "", "content_type": "", "error_detail": "HTTP 403"}
+        proxy_blocked = {"status": "module_unavailable", "html": "", "content_type": "", "error_detail": "no proxy configured"}
+        with patch("src.dih_engine.recon.seer.curlffi_probe.probe", return_value=curlffi_blocked), \
+             patch("src.dih_engine.recon.seer.proxy_probe.probe", return_value=proxy_blocked):
+            result = analyze_tech_stack("http://example.com", mock_session, _sleep_fn=_NO_SLEEP)
+
+        # All three layers failed -- error_detail must mention both fallback attempts
+        assert "curl_cffi" in result.error_detail
+        assert "proxy" in result.error_detail

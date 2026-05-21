@@ -30,7 +30,7 @@ from dotenv import load_dotenv
 
 from ..notifications import notify_all
 from .error_taxonomy import FALLBACK_MAP
-from .modules import curlffi_probe, playwright_probe, requests_probe
+from .modules import curlffi_probe, playwright_probe, proxy_probe, requests_probe
 
 load_dotenv()
 
@@ -132,6 +132,14 @@ def analyze_tech_stack(
                 logger.info("fallback_success url=%s module=curl_cffi", url)
                 return fb
             result.error_detail += f" | curl_cffi: {fb.error_detail}"
+            # Second-level fallback: proxy rotation when curl_cffi also blocked
+            logger.info("fallback_triggered url=%s status=%s module=proxy", url, fb.status)
+            px_fetch = proxy_probe.probe(url, timeout=timeout)
+            px = _build_probe_result(url, px_fetch)
+            if px.status == "ok":
+                logger.info("fallback_success url=%s module=proxy", url)
+                return px
+            result.error_detail += f" | proxy: {px.error_detail}"
 
         elif module_name == "playwright":
             fb_fetch = playwright_probe.probe(url, timeout=timeout)

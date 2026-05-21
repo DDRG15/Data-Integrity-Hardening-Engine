@@ -100,8 +100,8 @@ When a probe fails, the error is classified and the appropriate fallback module 
 
 | Error code | Cause | Fallback module |
 |------------|-------|-----------------|
-| `http_403` | WAF / Cloudflare block | `curl_cffi` (TLS fingerprint bypass) |
-| `ssl_error` | TLS handshake mismatch | `curl_cffi` |
+| `http_403` | WAF / Cloudflare block | `curl_cffi` -> `proxy` (two-stage) |
+| `ssl_error` | TLS handshake mismatch | `curl_cffi` -> `proxy` (two-stage) |
 | `http_429` | Rate limited | `delay_retry` (10-12s backoff + retry) |
 | `timeout` | Slow site | `delay_retry` |
 | `js_required` | CSR-only page (empty body) | `playwright` (headless browser) |
@@ -116,10 +116,20 @@ Real-world results from a 100-URL live test (2026-05-21):
 - **1 ssl_error** -- expired server cert (terminal, correctly buried)
 - **1 connection_error** -- DNS failure (terminal)
 
-### Proxy rotation (next module)
-Sites that block both `requests` and `curl_cffi` (e.g. stackoverflow.com, etsy.com) require
-a residential proxy service. This is the next planned module (`proxy_probe.py`).
-See [ROADMAP.md](ROADMAP.md).
+### Proxy rotation (third-level fallback)
+When `curl_cffi` also fails on a 403, `proxy_probe` is tried automatically.
+Configure one backend in `.env`:
+
+```env
+# Option A: any HTTP/SOCKS5 proxy (Oxylabs, BrightData, Smartproxy, etc.)
+DIH_PROXY_URL=http://user:pass@proxy.provider.com:8080
+
+# Option B: Scrapfly free tier (https://scrapfly.io)
+SCRAPFLY_API_KEY=scp-live-...
+```
+
+SOCKS5 support requires `pip install "dih-engine[proxy]"`. If neither is set, the module
+documents `module_unavailable` in the CSV and continues without raising.
 
 ---
 
@@ -188,7 +198,8 @@ tests/
 **Persistent WAF blocks (Seer V4)**
 Sites with advanced bot protection (Akamai Enterprise, Cloudflare Pro) block both
 `requests` and `curl_cffi`. Live test confirmed: stackoverflow.com, etsy.com, centauro.com.br.
-Resolution: `proxy_probe.py` module using a residential proxy service (Scrapfly, ZenRows, Oxylabs).
+`proxy_probe` is wired as the third fallback -- configure `DIH_PROXY_URL` or `SCRAPFLY_API_KEY`
+in `.env` to activate it.
 
 **Expired server certificates**
 `ssl_error` where the remote server has an expired cert (e.g. tricae.com.br) is terminal --
@@ -215,7 +226,7 @@ probe via `aiohttp` (see ROADMAP.md).
 - Added: Intelligence Report probe breakdown (e.g. "87 ok, 6 http_403, 2 timeout")
 - Added: Slack notifier -- Block Kit formatted report after each recon run
 - Added: Discord notifier -- rich embed with color-coded status after each recon run
-- Added: `[tls]`, `[browser]`, `[full]` optional extras in `pyproject.toml`
+- Added: `[tls]`, `[browser]`, `[proxy]`, `[full]` optional extras in `pyproject.toml`
 - Live tested: 100 URLs; curl_cffi rescued 3 WAF-blocked sites; delay_retry resolved both 429s
 
 **V3.2**

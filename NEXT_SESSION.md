@@ -98,6 +98,32 @@ O agregar el workflow de CI para que publique automáticamente en cada tag:
 - Webhooks guardados en .env (gitignored)
 
 ### Pendiente
-- **proxy_probe.py** -- módulo de rotación de proxies (Scrapfly/ZenRows/Oxylabs)
-- **Push a GitHub** -- 9 commits locales sin subir
+- **Push a GitHub** -- commits locales sin subir
 - **PyPI** -- pendiente de decisión
+
+---
+
+## [2026-05-21] proxy_probe.py implementado -- tercer nivel del fallback chain
+
+### Arquitectura final del fallback chain
+```
+requests -> 403/ssl -> curl_cffi -> aún 403 -> proxy_probe -> module_unavailable (sin config)
+requests -> 429/timeout -> delay_retry (backoff 10-12s)
+requests -> js_required -> playwright
+requests -> connection_error -> terminal (sin fallback)
+```
+
+### proxy_probe.py soporta dos backends
+- **DIH_PROXY_URL** -- cualquier proxy HTTP/SOCKS5 (Oxylabs, BrightData, Smartproxy)
+- **SCRAPFLY_API_KEY** -- API de Scrapfly (tiene free tier)
+- Sin configuración: documenta `module_unavailable` en el CSV y continúa sin crash
+
+### Tests
+- 55 tests verdes (6 nuevos para proxy_probe)
+- `test_proxy_is_third_fallback_after_curlffi` verifica el encadenamiento completo
+
+### Para activar proxy en el próximo live test
+1. Registrarse en https://scrapfly.io (free tier: 1,000 requests/mes)
+2. Agregar `SCRAPFLY_API_KEY=scp-live-...` al `.env`
+3. Correr: `dih-engine recon --input data/urls_test.csv --output data/plan_proxy.csv --sample-size 10`
+4. Verificar que stackoverflow.com, etsy.com, centauro.com.br ahora dicen `ok`
