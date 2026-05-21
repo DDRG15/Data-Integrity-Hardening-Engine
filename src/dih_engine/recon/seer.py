@@ -59,14 +59,14 @@ def locate_gold_mines(html: str) -> list[str]:
 def _identify_stack(html: str, content_type: str) -> tuple[str, str]:
     """Maps HTML fingerprints to a (tech_stack, extraction_strategy) tuple."""
     if "application/json" in content_type:
-        return "Pure JSON API", "requests — direct JSON parse"
+        return "Pure JSON API", "requests -- direct JSON parse"
     if '"props":{"pageProps":' in html or '<script id="__NEXT_DATA__"' in html:
         return "Next.js (SSR)", "Parse __NEXT_DATA__ JSON or Selenium for dynamic routes"
     if "data-reactroot" in html or "react-dom" in html:
         return "React.js (CSR)", "Selenium with dynamic waits"
     if "vtex.cmc" in html or "vtex-" in html:
         return "VTEX Commerce", "requests if API exposed, else Selenium"
-    return "Static HTML", "BeautifulSoup — fast and direct"
+    return "Static HTML", "BeautifulSoup -- fast and direct"
 
 
 def analyze_tech_stack(

@@ -54,7 +54,11 @@ desktop.ini
 *.whl
 *.tar.gz
 
+# Claude Code local config
+.claude/
+
 # Project output files (never commit processed data)
 *.jsonl
 *.db
+data/
 seer_mapa_master_plan.csv
