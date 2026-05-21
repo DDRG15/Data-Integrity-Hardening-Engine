@@ -1,20 +1,25 @@
 """
-Seer V3 — Web Recon Strategist
+Seer V4 -- Web Recon Strategist with Error Diagnostics + Fallback Chain
+
 Probes a set of URLs, identifies their tech stack, and produces a master
 strategy plan for downstream data extraction.
 
-Known limitations (V3 scope):
-  - Synchronous HTTP — see ROADMAP.md for the async V4 Swarm Protocol.
-  - No robots.txt enforcement — operators must verify compliance before use.
-  - TLS fingerprinting: 'requests' library is detectable by enterprise WAFs
-    (Akamai, Cloudflare). Production use against protected sites requires
-    curl_cffi or a managed proxy service.
+Fallback chain (Option B):
+  http_403, ssl_error  -> curl_cffi   (TLS fingerprint bypass)
+  http_429, timeout    -> delay_retry  (exponential backoff + retry)
+  js_required          -> playwright   (headless browser)
+
+Install optional extras to activate fallback modules:
+  pip install "dih-engine[tls]"      # curl_cffi
+  pip install "dih-engine[browser]"  # playwright
+  pip install "dih-engine[full]"     # both
 """
 import logging
 import os
 import random
 import sys
 import time
+from dataclasses import dataclass, field
 from typing import Optional
 
 import pandas as pd
@@ -23,15 +28,26 @@ import requests
 from bs4 import BeautifulSoup
 from dotenv import load_dotenv
 
+from .error_taxonomy import FALLBACK_MAP
+from .modules import curlffi_probe, playwright_probe, requests_probe
+
 load_dotenv()
 
 logger = logging.getLogger(__name__)
 
-USER_AGENTS = [
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36",
-    "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/118.0.0.0 Safari/537.36",
-]
+USER_AGENTS = requests_probe.USER_AGENTS
+
+
+@dataclass
+class ProbeResult:
+    url: str
+    status: str  # "ok" | "http_403" | "http_429" | "http_other" | "timeout"
+                 # "connection_error" | "ssl_error" | "js_required" | "module_unavailable"
+    tech: str = ""
+    strategy: str = ""
+    mines: list[str] = field(default_factory=list)
+    error_detail: str = ""
+    fallback_module: str = ""
 
 
 def _disk_path() -> str:
@@ -71,48 +87,83 @@ def _identify_stack(html: str, content_type: str) -> tuple[str, str]:
     return "Static HTML", "BeautifulSoup -- fast and direct"
 
 
+def _build_probe_result(url: str, fetch: dict) -> ProbeResult:
+    """Converts a raw fetch dict from a probe module into a ProbeResult."""
+    if fetch["status"] != "ok":
+        fallback = FALLBACK_MAP.get(fetch["status"], "")
+        return ProbeResult(
+            url=url,
+            status=fetch["status"],
+            error_detail=fetch["error_detail"],
+            fallback_module=fallback,
+        )
+    html = fetch["html"]
+    content_type = fetch["content_type"]
+    tech, strategy = _identify_stack(html, content_type)
+    mines = locate_gold_mines(html)
+    return ProbeResult(url=url, status="ok", tech=tech, strategy=strategy, mines=mines)
+
+
 def analyze_tech_stack(
     url: str,
-    session: requests.Session,
+    session: Optional[requests.Session] = None,
     timeout: int = 10,
     _sleep_fn=time.sleep,
-) -> Optional[tuple[str, str, list[str]]]:
+) -> ProbeResult:
     """
-    Probes a single URL and returns (tech_stack, strategy, gold_mines).
-    Returns None on any network or HTTP failure.
-    _sleep_fn is injectable for testing — production callers use the default.
+    Probes a single URL and returns a ProbeResult with full error classification.
+    On failure, automatically attempts the appropriate fallback module per FALLBACK_MAP.
+    _sleep_fn is injectable for testing -- production callers use the default.
     """
     logger.info("probing url=%s", url)
-    _sleep_fn(random.uniform(1.2, 3.5))
 
-    try:
-        response = session.get(url, timeout=timeout)
-        response.raise_for_status()
-        content_type = response.headers.get("Content-Type", "")
-        tech, strategy = _identify_stack(response.text, content_type)
-        mines = locate_gold_mines(response.text)
-        logger.info("probe_result url=%s tech=%r strategy=%r", url, tech, strategy)
-        return tech, strategy, mines
-    except requests.exceptions.HTTPError as exc:
-        logger.warning("http_error url=%s status=%s", url, exc.response.status_code)
-    except requests.exceptions.ConnectionError as exc:
-        logger.warning("connection_error url=%s reason=%s", url, exc)
-    except requests.exceptions.Timeout:
-        logger.warning("timeout url=%s threshold=%ds", url, timeout)
-    except requests.exceptions.RequestException as exc:
-        logger.warning("request_failed url=%s reason=%s", url, exc)
-    return None
+    fetch = requests_probe.probe(url, timeout=timeout, session=session, _sleep_fn=_sleep_fn)
+    result = _build_probe_result(url, fetch)
+
+    if result.status != "ok":
+        module_name = result.fallback_module
+        logger.info("fallback_triggered url=%s status=%s module=%s", url, result.status, module_name)
+
+        if module_name == "curl_cffi":
+            fb_fetch = curlffi_probe.probe(url, timeout=timeout)
+            fb = _build_probe_result(url, fb_fetch)
+            if fb.status == "ok":
+                logger.info("fallback_success url=%s module=curl_cffi", url)
+                return fb
+            result.error_detail += f" | curl_cffi: {fb.error_detail}"
+
+        elif module_name == "playwright":
+            fb_fetch = playwright_probe.probe(url, timeout=timeout)
+            fb = _build_probe_result(url, fb_fetch)
+            if fb.status == "ok":
+                logger.info("fallback_success url=%s module=playwright", url)
+                return fb
+            result.error_detail += f" | playwright: {fb.error_detail}"
+
+        elif module_name == "delay_retry":
+            delay = random.uniform(5, 12)
+            logger.info("delay_retry url=%s delay=%.1fs", url, delay)
+            _sleep_fn(delay)
+            retry_fetch = requests_probe.probe(url, timeout=timeout, session=session, _sleep_fn=lambda _: None)
+            retry = _build_probe_result(url, retry_fetch)
+            if retry.status == "ok":
+                logger.info("delay_retry_success url=%s", url)
+                return retry
+            result.error_detail += f" | retry: {retry.error_detail}"
+
+    logger.info("probe_result url=%s status=%s tech=%r", url, result.status, result.tech)
+    return result
 
 
-def _majority_stack(results: list[tuple[str, str, list[str]]]) -> tuple[str, str, list[str]]:
-    """Returns the most commonly detected stack from a list of probe results."""
-    stacks = [r[0] for r in results]
+def _majority_stack(results: list[ProbeResult]) -> ProbeResult:
+    """Returns the most commonly detected stack from a list of successful ProbeResults."""
+    stacks = [r.tech for r in results]
     majority = max(set(stacks), key=stacks.count)
     if stacks.count(majority) < len(stacks) / 2:
         logger.warning(
             "no_majority_stack detections=%s -- using most frequent: %s", stacks, majority
         )
-    return next(r for r in results if r[0] == majority)
+    return next(r for r in results if r.tech == majority)
 
 
 def _extract_name(row: pd.Series) -> str:
@@ -135,7 +186,7 @@ def clean_and_optimize_map(
     request_timeout = request_timeout or int(os.getenv("SEER_REQUEST_TIMEOUT", "10"))
     sample_size = sample_size or int(os.getenv("SEER_SAMPLE_SIZE", "3"))
 
-    logger.info("seer_v3_start input=%s", input_file)
+    logger.info("seer_v4_start input=%s", input_file)
 
     if not os.path.exists(input_file):
         logger.error("missing_input_file path=%s", input_file)
@@ -162,27 +213,60 @@ def clean_and_optimize_map(
 
     logger.info("probing_sample size=%d urls=%s", len(sample_urls), sample_urls)
 
-    results = []
+    all_results: list[ProbeResult] = []
     with requests.Session() as session:
         session.headers.update({"User-Agent": random.choice(USER_AGENTS)})
         for url in sample_urls:
-            result = analyze_tech_stack(url, session, timeout=request_timeout)
-            if result:
-                results.append(result)
+            result = analyze_tech_stack(url, session=session, timeout=request_timeout)
+            all_results.append(result)
 
-    if not results:
+    # Attach per-URL diagnostics to every row that was probed
+    status_map = {r.url: r.status for r in all_results}
+    error_map = {r.url: r.error_detail for r in all_results}
+    fallback_map_col = {r.url: r.fallback_module for r in all_results}
+    df["Status"] = df["URL"].map(status_map).fillna("")
+    df["Error_Detail"] = df["URL"].map(error_map).fillna("")
+    df["Fallback_Module"] = df["URL"].map(fallback_map_col).fillna("")
+
+    # Probe breakdown for console
+    status_counts: dict[str, int] = {}
+    for r in all_results:
+        status_counts[r.status] = status_counts.get(r.status, 0) + 1
+
+    fallback_counts: dict[str, int] = {}
+    for r in all_results:
+        if r.fallback_module:
+            fallback_counts[r.fallback_module] = fallback_counts.get(r.fallback_module, 0) + 1
+
+    ok_results = [r for r in all_results if r.status == "ok"]
+    if not ok_results:
         logger.error("all_probes_failed no tech stack detected from sample")
+        print("\n[SEER V4] All probes failed -- saving diagnostic CSV anyway.")
+        print(f"  Status breakdown: {status_counts}")
+        df.to_csv(output_file, index=False)
+        logger.info("diagnostic_plan_saved path=%s rows=%d", output_file, len(df))
         return
 
-    tech, strategy, mines = _majority_stack(results)
+    winner = _majority_stack(ok_results)
 
-    logger.info("intelligence_report tech=%r strategy=%r mines=%s", tech, strategy, mines[0])
+    summary_str = ", ".join(f"{v} {k}" for k, v in status_counts.items())
+    fallback_str = (
+        ", ".join(f"{m} ({n})" for m, n in fallback_counts.items())
+        if fallback_counts else "none"
+    )
+
+    logger.info(
+        "intelligence_report tech=%r strategy=%r mines=%s",
+        winner.tech, winner.strategy, winner.mines[0] if winner.mines else "",
+    )
     print("\n" + "=" * 60)
-    print("   INTELLIGENCE REPORT")
+    print("   INTELLIGENCE REPORT  (Seer V4)")
     print("   " + "-" * 53)
-    print(f"   Architecture:  {tech}")
-    print(f"   Strategy:      {strategy}")
-    print(f"   Gold Mines:    {mines[0]}")
+    print(f"   Architecture:    {winner.tech}")
+    print(f"   Strategy:        {winner.strategy}")
+    print(f"   Gold Mines:      {winner.mines[0] if winner.mines else 'n/a'}")
+    print(f"   Probe summary:   {summary_str}")
+    print(f"   Fallback needed: {fallback_str}")
     print("=" * 60 + "\n")
 
     df.to_csv(output_file, index=False)

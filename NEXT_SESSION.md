@@ -46,3 +46,30 @@ O agregar el workflow de CI para que publique automáticamente en cada tag:
 ## 4. Cosas menores pendientes
 - Agregar `.gitattributes` para fijar line endings (LF) — git está convirtiendo a CRLF en Windows y genera warnings en cada commit
 - Decidir si `.claude/` va al `.gitignore` (contiene config local de Claude Code)
+
+---
+
+## [2026-05-21] Seer V4 implementado — Option A + Option B
+
+### Qué se hizo
+- **Option A (error diagnostics)**: `ProbeResult` dataclass reemplaza las tuplas crudas.
+  Cada URL obtiene un `status` clasificado: `ok`, `http_403`, `http_429`, `http_other`,
+  `timeout`, `ssl_error`, `connection_error`, `js_required`.
+  El CSV de salida ahora incluye columnas `Status`, `Error_Detail`, `Fallback_Module`.
+  El Intelligence Report imprime el breakdown de errores y qué módulos de fallback se necesitan.
+
+- **Option B (fallback chain)**: arquitectura modular en `src/dih_engine/recon/modules/`:
+  - `requests_probe.py` — módulo base (siempre disponible)
+  - `curlffi_probe.py` — bypass de WAF via TLS fingerprinting (`pip install "dih-engine[tls]"`)
+  - `playwright_probe.py` — headless browser para páginas CSR (`pip install "dih-engine[browser]"`)
+  - `error_taxonomy.py` — mapa `{http_403: curl_cffi, ssl_error: curl_cffi, http_429: delay_retry, timeout: delay_retry, js_required: playwright}`
+
+- `pyproject.toml`: agregados optional extras `[tls]`, `[browser]`, `[full]`.
+- 49 tests verdes (22 nuevos para V4, incluyendo `TestBuildProbeResult`).
+
+### Pendiente de esta sesión
+- **Live test en URLs reales** con el nuevo `--sample-size 10` para ver los nuevos campos en acción.
+- **Push a GitHub** — no se hizo aún.
+- **PyPI** — pendiente de decisión.
+- **Slack template** — el usuario mencionó que quiere un template de notificaciones Slack
+  para el proyecto (no está activo, solo como placeholder).

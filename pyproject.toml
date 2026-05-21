@@ -17,6 +17,11 @@ dependencies = [
     "lxml>=5.0.0",
 ]
 
+[project.optional-dependencies]
+tls     = ["curl-cffi>=0.6"]
+browser = ["playwright>=1.40"]
+full    = ["curl-cffi>=0.6", "playwright>=1.40"]
+
 [project.scripts]
 dih-engine = "dih_engine.cli:main"
 
