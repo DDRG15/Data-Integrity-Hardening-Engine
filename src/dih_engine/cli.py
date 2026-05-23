@@ -74,6 +74,13 @@ def main() -> None:
     args = parser.parse_args()
 
     if args.command == "extract":
+        if not 0 < args.pause_threshold < 100:
+            print("error: --pause-threshold must be between 0 and 100", file=sys.stderr)
+            sys.exit(1)
+        if not 0 < args.disk_threshold < 100:
+            print("error: --disk-threshold must be between 0 and 100", file=sys.stderr)
+            sys.exit(1)
+
         try:
             result = bulletproof_processor(
                 args.input,
@@ -96,6 +103,13 @@ def main() -> None:
         )
 
     elif args.command == "recon":
+        if args.timeout <= 0:
+            print("error: --timeout must be a positive integer", file=sys.stderr)
+            sys.exit(1)
+        if args.sample_size <= 0:
+            print("error: --sample-size must be a positive integer", file=sys.stderr)
+            sys.exit(1)
+
         from .recon import clean_and_optimize_map
 
         try:

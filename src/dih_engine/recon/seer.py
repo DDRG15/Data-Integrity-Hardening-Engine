@@ -216,8 +216,15 @@ def clean_and_optimize_map(
 ) -> None:
     input_file = input_file or os.getenv("SEER_INPUT_CSV", "seer_mapa_v2.csv")
     output_file = output_file or os.getenv("SEER_OUTPUT_FILE", "seer_mapa_master_plan.csv")
-    request_timeout = request_timeout or int(os.getenv("SEER_REQUEST_TIMEOUT", "10"))
-    sample_size = sample_size or int(os.getenv("SEER_SAMPLE_SIZE", "3"))
+    if request_timeout is None:
+        request_timeout = int(os.getenv("SEER_REQUEST_TIMEOUT", "10"))
+    if sample_size is None:
+        sample_size = int(os.getenv("SEER_SAMPLE_SIZE", "3"))
+
+    if request_timeout <= 0:
+        raise ValueError("request_timeout must be a positive integer")
+    if sample_size <= 0:
+        raise ValueError("sample_size must be a positive integer")
 
     logger.info("seer_v4_start input=%s", input_file)
 
@@ -235,6 +242,12 @@ def clean_and_optimize_map(
 
     if "URL" not in df.columns:
         raise ValueError(f"CSV missing required 'URL' column. Found: {list(df.columns)}")
+
+    df["URL"] = df["URL"].astype(str).str.strip()
+    df["URL"] = df["URL"].replace({"nan": ""})
+    df["URL"] = df["URL"].replace("", pd.NA)
+    if df["URL"].isna().all():
+        raise ValueError("CSV 'URL' column contains no valid URLs")
 
     df["Nombre Categoria"] = df.apply(_extract_name, axis=1)
     df = df.drop_duplicates(subset=["URL"])

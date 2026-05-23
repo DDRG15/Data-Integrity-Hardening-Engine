@@ -456,3 +456,27 @@ class TestCleanAndOptimizeMap:
             clean_and_optimize_map(str(input_csv), str(output_csv), request_timeout=10, sample_size=1)
 
         assert output_csv.exists(), "CSV must be written even when notifications fail"
+
+    def test_request_timeout_must_be_positive(self, tmp_path):
+        input_csv = tmp_path / "urls.csv"
+        input_csv.write_text("URL,Nombre Categoria\nhttps://example.com,Test\n")
+        output_csv = tmp_path / "output.csv"
+
+        with pytest.raises(ValueError, match="request_timeout must be a positive integer"):
+            clean_and_optimize_map(str(input_csv), str(output_csv), request_timeout=0, sample_size=1)
+
+    def test_sample_size_must_be_positive(self, tmp_path):
+        input_csv = tmp_path / "urls.csv"
+        input_csv.write_text("URL,Nombre Categoria\nhttps://example.com,Test\n")
+        output_csv = tmp_path / "output.csv"
+
+        with pytest.raises(ValueError, match="sample_size must be a positive integer"):
+            clean_and_optimize_map(str(input_csv), str(output_csv), request_timeout=10, sample_size=0)
+
+    def test_csv_with_no_valid_urls_raises(self, tmp_path):
+        input_csv = tmp_path / "urls.csv"
+        input_csv.write_text("URL,Nombre Categoria\n,Empty\n\n")
+        output_csv = tmp_path / "output.csv"
+
+        with pytest.raises(ValueError, match="CSV 'URL' column contains no valid URLs"):
+            clean_and_optimize_map(str(input_csv), str(output_csv), request_timeout=10, sample_size=1)

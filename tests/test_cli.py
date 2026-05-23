@@ -121,6 +121,20 @@ class TestMainExtract:
         positional = mock_fn.call_args.args
         assert "csv" in positional or kwargs.get("output_format") == "csv"
 
+    def test_invalid_pause_threshold_exits_1(self):
+        argv = self._BASE_ARGV + ["--pause-threshold", "0"]
+        with patch("sys.argv", argv):
+            with pytest.raises(SystemExit) as exc_info:
+                main()
+        assert exc_info.value.code == 1
+
+    def test_invalid_disk_threshold_exits_1(self):
+        argv = self._BASE_ARGV + ["--disk-threshold", "100"]
+        with patch("sys.argv", argv):
+            with pytest.raises(SystemExit) as exc_info:
+                main()
+        assert exc_info.value.code == 1
+
 
 class TestMainRecon:
     _BASE_ARGV = ["dih-engine", "recon", "--input", "urls.csv", "--output", "plan.csv"]
@@ -141,6 +155,20 @@ class TestMainRecon:
         call_kwargs = mock_fn.call_args.kwargs
         assert call_kwargs.get("request_timeout") == 20
         assert call_kwargs.get("sample_size") == 5
+
+    def test_invalid_timeout_exits_1(self):
+        argv = self._BASE_ARGV + ["--timeout", "0"]
+        with patch("sys.argv", argv):
+            with pytest.raises(SystemExit) as exc_info:
+                main()
+        assert exc_info.value.code == 1
+
+    def test_invalid_sample_size_exits_1(self):
+        argv = self._BASE_ARGV + ["--sample-size", "0"]
+        with patch("sys.argv", argv):
+            with pytest.raises(SystemExit) as exc_info:
+                main()
+        assert exc_info.value.code == 1
 
     def test_file_not_found_exits_1(self):
         with patch("sys.argv", self._BASE_ARGV):
