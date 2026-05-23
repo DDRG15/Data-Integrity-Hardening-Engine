@@ -66,34 +66,43 @@ fixes directly; Claude implemented the SDET fix. All 3 findings closed same sess
 
 Full 5W+How for all 3 findings: [AUDIT_2026-05-23.md](AUDIT_2026-05-23.md#github-copilot-second-audit--2026-05-23-afternoon-cycle)
 
-Commit for SDET fix: `69646c1` — `test(SDET): probe module branch coverage -- requests_probe, curlffi, playwright`
+### Phase 5 — Copilot Second-Pass Coverage Push
+
+After hitting its rate limit, Copilot produced `claude_full_fix.apply_patch.txt` for Claude to apply.
+Claude verified and committed the changes.
+
+**Changes applied (commit `a3b4594`):**
+- `seer.py` — strict URL schema validation (regex `^https?://`); rejects malformed URLs before probing, raises `ValueError` with first 5 bad values listed
+- `tests/test_seer.py` (+12 tests):
+  - `test_playwright_fallback_success`, `test_delay_retry_success`, `test_curl_cffi_flaresolverr_proxy_success` (full 3-level fallback chain)
+  - Scrapfly error branches: 401→invalid key, 429→quota exceeded, 503→http_other, exception→http_other
+  - `test_proxy_probe_prefers_generic_proxy`, `test_proxy_probe_uses_scrapfly_when_generic_proxy_missing`
+  - `test_invalid_url_in_csv_gets_invalid_url_status` rewritten to expect `ValueError("malformed URLs")`
+- `tests/test_seer_followups.py` (new, 2 tests):
+  - `test_clean_and_optimize_map_handles_threadpool_timeout` — FakeExecutor + TimeoutError → Status=timeout in CSV
+  - `test_flaresolverr_error_path_returns_http_other` — JSON status=error response → http_other
 
 ---
 
-## Current State (end of 2026-05-23 session — after Copilot audit cycle)
+## Current State (end of 2026-05-23 session — after all audit cycles)
 
 ### Git log (local, not pushed)
 ```
+a3b4594  feat+test: strict URL schema validation + expanded fallback/proxy branch coverage
+0206ee5  docs: record Copilot audit findings and resolution in AUDIT log and PROGRESS_LOG
 69646c1  test(SDET): probe module branch coverage -- requests_probe, curlffi, playwright
-[prev]   [Copilot commit — SRE + DATA fixes + 11 new tests]
+0dfc514  feat(validation): SRE + DATA hardening from Copilot MODE A audit
+7c749f7  docs: add CHANGELOG.md + docs/PROGRESS_LOG.md
 aab9254  test: expand coverage 67% -> 83% across all modules
 f49214d  audit(v4): fix 6 findings from MODE A review + 48-test suite
-8457d69  chore: untrack NEXT_SESSION.md + rewrite ROADMAP to V4.0
-d9c4133  docs(readme): add Roadmap section -- deliberate next steps, not gaps
-7cbbc69  docs: update README + NEXT_SESSION for V4 final state
-f3758dc  feat(recon): http_401/521 error codes + parallel probing via ThreadPoolExecutor
-6f5e8a8  feat(recon): flaresolverr_probe -- self-hosted Cloudflare bypass
-3aa562b  feat(recon): proxy_probe -- third-level fallback for persistent WAF blocks
-65a99aa  feat(notifications): Slack + Discord notifiers wired into Seer V4
-26a2dc8  feat(recon): Seer V4 -- error diagnostics + modular fallback chain
-...     [earlier commits — see CHANGELOG.md]
+...     [see CHANGELOG.md for full history]
 ```
 
-**~17 commits ahead of origin/main.** Not pushed. User reviewing before GitHub push.
+**~23 commits ahead of origin/main.** Not pushed. User reviewing before GitHub push.
 
 ### Test suite
 ```
-150 passed, 0 warnings — 28.83s on Python 3.12.10 / Windows 10
+162 passed, 0 warnings — 28.78s on Python 3.12.10 / Windows 10
 ```
 
 ### Coverage summary
@@ -103,12 +112,14 @@ extraction/engine.py           91%   (146-164 requires 10k+ line fixture, accept
 notifications/__init__.py      100%
 notifications/discord.py       100%
 notifications/slack.py         100%
-recon/seer.py                   83%
+recon/seer.py                   90%   (was 83%)
 sanitizer/core.py               87%   (104-115 = __main__ demo block)
-requests_probe.py              100%   (was 87%)
-curlffi_probe.py                90%   (was 30%; lines 14-15 = ImportError, acceptable)
-playwright_probe.py             91%   (was 26%; lines 14-15 = ImportError, acceptable)
-TOTAL                           89%   (was 83%)
+requests_probe.py              100%
+curlffi_probe.py                90%   (lines 14-15 = ImportError, acceptable)
+playwright_probe.py             91%   (lines 14-15 = ImportError, acceptable)
+proxy_probe.py                 100%   (was 74%)
+flaresolverr_probe.py           85%   (lines 73-74, 87-89 = rare HTTP errors)
+TOTAL                           93%   (was 89%)
 ```
 
 ---
