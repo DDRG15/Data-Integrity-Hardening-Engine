@@ -195,6 +195,83 @@ class TestAnalyzeTechStack:
         with pytest.raises(KeyboardInterrupt):
             analyze_tech_stack("http://example.com", mock_session, _sleep_fn=_NO_SLEEP)
 
+    def test_playwright_fallback_success(self):
+        first_fetch = {
+            "status": "js_required",
+            "html": "",
+            "content_type": "text/html",
+            "error_detail": "JavaScript shell detected",
+        }
+        play_fetch = {
+            "status": "ok",
+            "html": "<html><body>Rendered by Playwright</body></html>",
+            "content_type": "text/html",
+            "error_detail": "",
+        }
+        with patch("src.dih_engine.recon.seer.requests_probe.probe", return_value=first_fetch), \
+             patch("src.dih_engine.recon.seer.playwright_probe.probe", return_value=play_fetch):
+            result = analyze_tech_stack("http://example.com", session=None, _sleep_fn=_NO_SLEEP)
+
+        assert result.status == "ok"
+        assert result.error_detail == ""
+        assert result.tech == "Static HTML"
+
+    def test_delay_retry_success(self):
+        first_fetch = {
+            "status": "timeout",
+            "html": "",
+            "content_type": "",
+            "error_detail": "timeout after 10s",
+        }
+        retry_fetch = {
+            "status": "ok",
+            "html": "<html><body>Delay retry success</body></html>",
+            "content_type": "text/html",
+            "error_detail": "",
+        }
+        with patch("src.dih_engine.recon.seer.requests_probe.probe", side_effect=[first_fetch, retry_fetch]):
+            result = analyze_tech_stack("http://example.com", session=None, _sleep_fn=_NO_SLEEP)
+
+        assert result.status == "ok"
+        assert result.error_detail == ""
+        assert result.tech == "Static HTML"
+
+    def test_curl_cffi_flaresolverr_proxy_success(self):
+        first_fetch = {
+            "status": "http_403",
+            "html": "",
+            "content_type": "",
+            "error_detail": "HTTP 403 Forbidden",
+        }
+        curlffi_blocked = {
+            "status": "http_403",
+            "html": "",
+            "content_type": "",
+            "error_detail": "curl_cffi blocked",
+        }
+        flaresolverr_blocked = {
+            "status": "module_unavailable",
+            "html": "",
+            "content_type": "",
+            "error_detail": "FlareSolverr not configured",
+        }
+        proxy_ok = {
+            "status": "ok",
+            "html": "<html><body>Proxy fallback success</body></html>",
+            "content_type": "text/html",
+            "error_detail": "",
+        }
+
+        with patch("src.dih_engine.recon.seer.requests_probe.probe", return_value=first_fetch), \
+             patch("src.dih_engine.recon.seer.curlffi_probe.probe", return_value=curlffi_blocked), \
+             patch("src.dih_engine.recon.seer.flaresolverr_probe.probe", return_value=flaresolverr_blocked), \
+             patch("src.dih_engine.recon.seer.proxy_probe.probe", return_value=proxy_ok):
+            result = analyze_tech_stack("http://example.com", session=None, _sleep_fn=_NO_SLEEP)
+
+        assert result.status == "ok"
+        assert result.error_detail == ""
+        assert result.tech == "Static HTML"
+
 
 class TestMajorityStack:
     def test_clear_majority_selected(self):
@@ -335,6 +412,93 @@ class TestProxyProbe:
         assert result["status"] == "http_other"
         assert "empty" in result["error_detail"]
 
+    def test_scrapfly_401_returns_invalid_api_key(self):
+        error_response = MagicMock()
+        error_response.status_code = 401
+        http_error = requests.exceptions.HTTPError(response=error_response)
+
+        mock_response = MagicMock()
+        mock_response.raise_for_status.side_effect = http_error
+
+        with patch("src.dih_engine.recon.modules.proxy_probe.requests.get", return_value=mock_response):
+            result = _via_scrapfly("http://example.com", "scp-test-key", timeout=10)
+
+        assert result["status"] == "http_other"
+        assert "invalid API key" in result["error_detail"]
+
+    def test_scrapfly_429_returns_quota_exceeded(self):
+        error_response = MagicMock()
+        error_response.status_code = 429
+        http_error = requests.exceptions.HTTPError(response=error_response)
+
+        mock_response = MagicMock()
+        mock_response.raise_for_status.side_effect = http_error
+
+        with patch("src.dih_engine.recon.modules.proxy_probe.requests.get", return_value=mock_response):
+            result = _via_scrapfly("http://example.com", "scp-test-key", timeout=10)
+
+        assert result["status"] == "http_429"
+        assert "quota exceeded" in result["error_detail"]
+
+    def test_scrapfly_generic_http_error_returns_http_other(self):
+        error_response = MagicMock()
+        error_response.status_code = 503
+        http_error = requests.exceptions.HTTPError(response=error_response)
+
+        mock_response = MagicMock()
+        mock_response.raise_for_status.side_effect = http_error
+
+        with patch("src.dih_engine.recon.modules.proxy_probe.requests.get", return_value=mock_response):
+            result = _via_scrapfly("http://example.com", "scp-test-key", timeout=10)
+
+        assert result["status"] == "http_other"
+        assert "HTTP 503" in result["error_detail"]
+
+    def test_scrapfly_exception_returns_http_other(self):
+        with patch(
+            "src.dih_engine.recon.modules.proxy_probe.requests.get",
+            side_effect=requests.exceptions.RequestException("network failure"),
+        ):
+            result = _via_scrapfly("http://example.com", "scp-test-key", timeout=10)
+
+        assert result["status"] == "http_other"
+        assert "scrapfly: network failure" in result["error_detail"]
+
+    def test_proxy_probe_prefers_generic_proxy(self, monkeypatch):
+        monkeypatch.setenv("DIH_PROXY_URL", "http://proxy.example.com:8080")
+        monkeypatch.delenv("SCRAPFLY_API_KEY", raising=False)
+
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.text = "<html><body>Rescued page</body></html>"
+        mock_response.headers = {"Content-Type": "text/html"}
+        mock_response.raise_for_status = MagicMock()
+
+        with patch("src.dih_engine.recon.modules.proxy_probe.requests.get", return_value=mock_response):
+            result = proxy_probe("http://example.com")
+
+        assert result["status"] == "ok"
+
+    def test_proxy_probe_uses_scrapfly_when_generic_proxy_missing(self, monkeypatch):
+        monkeypatch.delenv("DIH_PROXY_URL", raising=False)
+        monkeypatch.setenv("SCRAPFLY_API_KEY", "scp-test-key")
+
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.raise_for_status = MagicMock()
+        mock_response.json.return_value = {
+            "result": {
+                "content": "<html><body>Scrapfly page</body></html>",
+                "response_headers": {"content-type": "text/html"},
+            }
+        }
+
+        with patch("src.dih_engine.recon.modules.proxy_probe.requests.get", return_value=mock_response):
+            result = proxy_probe("http://example.com")
+
+        assert result["status"] == "ok"
+        assert "Scrapfly" in result["html"]
+
     def test_full_chain_error_detail_has_all_three_layers(self, monkeypatch):
         # When requests AND curl_cffi both 403, proxy should be attempted third
         monkeypatch.delenv("DIH_PROXY_URL", raising=False)
@@ -435,12 +599,32 @@ class TestCleanAndOptimizeMap:
         input_csv = tmp_path / "urls.csv"
         input_csv.write_text("URL,Nombre Categoria\nnot-a-url,Bad\n")
         output_csv = tmp_path / "output.csv"
-
         with patch("src.dih_engine.recon.seer.notify_all"):
-            clean_and_optimize_map(str(input_csv), str(output_csv), request_timeout=10, sample_size=1)
+            with pytest.raises(ValueError, match="malformed URLs"):
+                clean_and_optimize_map(str(input_csv), str(output_csv), request_timeout=10, sample_size=1)
 
-        df = pd.read_csv(str(output_csv))
-        assert df.loc[df["URL"] == "not-a-url", "Status"].iloc[0] == "invalid_url"
+    def test_partial_map_with_invalid_and_valid_urls_writes_all_rows(self, tmp_path):
+        input_csv = tmp_path / "urls.csv"
+        input_csv.write_text(
+            "URL,Nombre Categoria\nnot-a-url,Bad\nhttps://example.com,Valid\n"
+        )
+        output_csv = tmp_path / "output.csv"
+
+        def analysis_side_effect(url, session=None, timeout=10, _sleep_fn=None):
+            if url == "https://example.com":
+                return ProbeResult(
+                    url=url,
+                    status="ok",
+                    tech="Static HTML",
+                    strategy="BeautifulSoup",
+                    mines=["Found 1 article"],
+                )
+            return ProbeResult(url=url, status="invalid_url", error_detail="malformed URL -- missing scheme or host")
+
+        with patch("src.dih_engine.recon.seer.analyze_tech_stack", side_effect=analysis_side_effect), \
+             patch("src.dih_engine.recon.seer.notify_all"):
+            with pytest.raises(ValueError, match="malformed URLs"):
+                clean_and_optimize_map(str(input_csv), str(output_csv), request_timeout=10, sample_size=2)
 
     def test_notification_failure_does_not_abort_csv_write(self, tmp_path):
         input_csv = tmp_path / "urls.csv"

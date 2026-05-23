@@ -249,6 +249,15 @@ def clean_and_optimize_map(
     if df["URL"].isna().all():
         raise ValueError("CSV 'URL' column contains no valid URLs")
 
+    # Strict URL schema validation: fail fast on malformed URL entries to
+    # avoid producing noisy diagnostic plans when input CSV rows are corrupted
+    # or missing schemes (e.g. "example.com"). This makes the failure
+    # explicit for the caller/CI instead of emitting 'not_probed' rows.
+    invalid_mask = ~df["URL"].astype(str).str.match(r"^https?://", na=False)
+    if invalid_mask.any():
+        sample_bad = df.loc[invalid_mask, "URL"].head(5).astype(str).tolist()
+        raise ValueError(f"CSV 'URL' column contains malformed URLs: {sample_bad}")
+
     df["Nombre Categoria"] = df.apply(_extract_name, axis=1)
     df = df.drop_duplicates(subset=["URL"])
 
