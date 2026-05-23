@@ -211,6 +211,21 @@ tests/
 
 ---
 
+## Roadmap
+
+The engine is production-ready for its current scope. The following are deliberate next steps, not gaps:
+
+| Priority | Item | Notes |
+|----------|------|-------|
+| High | **Native async probing** (`aiohttp`) | Replace `ThreadPoolExecutor` with true async I/O for better resource efficiency at scale |
+| High | **FlareSolverr live validation** | End-to-end test against real Cloudflare-protected sites (stackoverflow.com, etsy.com) once Docker is in CI |
+| Medium | **Locale-aware amount normalization** | Handle European format `1.234,50` via locale detection before OCR correction |
+| Medium | **Playwright live validation** | End-to-end test for `js_required` detection against real CSR-only pages |
+| Low | **Streaming extraction** | Pipeline output as a generator instead of collecting all records in memory |
+| Low | **Test coverage > 80%** | Current 57% reflects intentional prioritization of integration tests over mocks for HTTP-probe code |
+
+---
+
 ## Known Limitations
 
 **Persistent WAF blocks (Seer V4)**
