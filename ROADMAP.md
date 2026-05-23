@@ -1,53 +1,60 @@
 # Roadmap
 
-## Current State — V3.1 (Production-Hardened PoC)
+## Current State — V4.0
 
-The engine is a hardened, tested, and packaged Python library. All CRITICAL and HIGH bugs from V3.0 are resolved. The test suite enforces regressions. CI runs on every push across Python 3.10–3.12.
+The engine is production-ready as a local CLI and importable Python library.
+Published on TestPyPI. 63 tests passing across Python 3.10–3.12.
 
-What it is: a local, synchronous data processing tool. What it is not yet: a service anyone can call over a network.
-
----
-
-## Tier 1 — Developer Tool (Weeks 1–4)
-
-Target audience: data engineers and SDETs who process OCR exports and need a reliable sanitization layer in their pipelines.
-
-- Package published to PyPI as `dih-engine`
-- `pip install dih-engine` installs the CLI and the importable library
-- `--output-format csv|jsonl|sqlite` flag on the extraction engine
-- `DataSanitizer` usable as a drop-in import in any Python pipeline
-- Distribution: direct link, GitHub, or $50 one-time license for custom regex rule sets
+**Shipped in V4.0:**
+- Modular fallback chain: `requests` -> `curl_cffi` -> `FlareSolverr` -> `proxy`
+- Full error taxonomy: `http_401`, `http_403`, `http_429`, `http_521`, `ssl_error`, `timeout`, `connection_error`, `js_required`
+- Parallel probing via `ThreadPoolExecutor(max_workers=10)` — ~8x faster than sequential
+- Slack + Discord notifications after each recon run
+- `Status`, `Error_Detail`, `Fallback_Module` columns in every output CSV
+- Live tested: 91/101 URLs resolved successfully
 
 ---
 
-## Tier 2 — API Service (Month 2–3)
+## Tier 1 — Hardened CLI Tool (current focus)
 
-Target audience: teams that do not want to manage a Python environment. They POST data, they get structured records back.
+- Publish `dih-engine` to PyPI — `pip install dih-engine`
+- FlareSolverr end-to-end validation against real Cloudflare-protected sites in CI
+- Playwright end-to-end validation for `js_required` detection on real CSR pages
+- Locale-aware amount normalization — handle European format `1.234,50`
+- Test coverage from 57% to 80%+
 
-- FastAPI wrapper exposing three endpoints:
-  - `POST /extract` — submit raw text, receive structured JSONL
+---
+
+## Tier 2 — API Service
+
+Target: data teams that do not want to manage a Python environment.
+
+- FastAPI wrapper with three endpoints:
+  - `POST /extract` — submit raw OCR text, receive structured JSONL
   - `POST /sanitize` — submit a single line, receive a cleaned record with status
   - `GET /jobs/{id}` — poll async extraction jobs for large files
-- API key authentication (header-based, issued on signup)
-- Hosted on Railway or Render — no infrastructure to manage
-- Pricing: $9/month entry tier (up to 100K records/month), $49/month growth tier
+- API key authentication (header-based)
+- Hosted on Railway or Render
+- Pricing: usage-based tiers metered per 10K records
 
 ---
 
-## Tier 3 — V4 Swarm Protocol (Month 4+)
+## Tier 3 — Scale
 
-Target audience: production data teams running large-scale competitive intelligence, price monitoring, or document processing at 1M+ records/day.
+Target: production teams running large-scale document processing at 1M+ records/day.
 
-- **Async execution**: replace `requests` with `aiohttp` + `asyncio` — probe 100+ URLs concurrently
-- **Proxy rotation**: residential proxy middleware to defeat IP-based rate limiting
-- **Headless browser array**: Playwright grid for React/Next.js SPAs where `requests` sees an empty `<div id="root">`
-- **TLS spoofing**: `curl_cffi` to defeat JA3 fingerprinting on WAF-protected sites
-- **Webhook callbacks**: POST to a client endpoint when a large batch job completes
-- **Multi-tenant isolation**: per-tenant data separation in the API layer
-- **Usage-based billing**: per 10K records processed, metered via Stripe
+- Native async probing with `aiohttp` — replace `ThreadPoolExecutor` with true async I/O
+- Residential proxy rotation middleware for IP-based rate limit bypass
+- Playwright grid for high-volume CSR page rendering
+- Webhook callbacks on batch job completion
+- Multi-tenant data isolation in the API layer
+- Streaming extraction — pipeline output as a generator, constant memory footprint
 
 ---
 
-## What This Roadmap Does Not Include
+## Out of Scope
 
-Real-time streaming ingestion (Kafka, Kinesis) is not planned for Tier 2. The Tier 2 API is request-response, not a streaming pipeline. If stream processing becomes a requirement, that is a separate architectural decision that would change the storage layer, the worker model, and the billing model simultaneously — and it would be treated as a V5 initiative, not a feature flag on Tier 2.
+Real-time streaming ingestion (Kafka, Kinesis) is not planned. The Tier 2 API is
+request-response. If stream processing becomes a requirement, it is a separate
+architectural decision affecting the storage layer, worker model, and billing model —
+treated as a distinct initiative, not a feature added to this engine.
