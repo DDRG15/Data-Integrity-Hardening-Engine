@@ -39,6 +39,7 @@ def notify_recon_complete(
     fallback_counts: dict[str, int],
     output_file: str,
     timeout: int = 8,
+    flavor: str = "",
 ) -> bool:
     """
     Sends a Seer Intelligence Report to Discord as a rich embed.
@@ -70,7 +71,10 @@ def notify_recon_complete(
             {"name": "Gold Mine", "value": gold_mine, "inline": False},
         ],
         "footer": {
-            "text": f"dih-engine v4  |  {os.path.basename(output_file)}",
+            "text": (
+                f"dih-engine v4  |  {os.path.basename(output_file)}"
+                + (f"  |  {flavor}" if flavor else "")
+            ),
         },
         "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat(),
     }

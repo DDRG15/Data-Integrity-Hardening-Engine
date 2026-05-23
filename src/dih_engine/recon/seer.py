@@ -32,6 +32,7 @@ from bs4 import BeautifulSoup
 from dotenv import load_dotenv
 
 from ..notifications import notify_all
+from . import loading_messages
 from .error_taxonomy import FALLBACK_MAP
 from .modules import curlffi_probe, flaresolverr_probe, playwright_probe, proxy_probe, requests_probe
 
@@ -268,6 +269,9 @@ def clean_and_optimize_map(
 
     logger.info("probing_sample size=%d urls=%s", len(sample_urls), sample_urls)
 
+    _flavor_wait = loading_messages.waiting()
+    print(f"\n  {_flavor_wait}\n")
+
     # Each thread gets its own session -- requests.Session is not thread-safe.
     def _probe(url: str) -> ProbeResult:
         return analyze_tech_stack(url, session=None, timeout=request_timeout)
@@ -326,7 +330,9 @@ def clean_and_optimize_map(
     ok_results = [r for r in all_results if r.status == "ok"]
     if not ok_results:
         logger.error("all_probes_failed no tech stack detected from sample")
-        print("\n[SEER V4] All probes failed -- saving diagnostic CSV anyway.")
+        _flavor_fail = loading_messages.failure()
+        print(f"\n[SEER V4] All probes failed -- saving diagnostic CSV anyway.")
+        print(f"  {_flavor_fail}")
         print(f"  Status breakdown: {status_counts}")
         df.to_csv(output_file, index=False)
         logger.info("diagnostic_plan_saved path=%s rows=%d", output_file, len(df))
@@ -354,6 +360,9 @@ def clean_and_optimize_map(
     print(f"   Fallback needed: {fallback_str}")
     print("=" * 60 + "\n")
 
+    _flavor_success = loading_messages.success()
+    print(f"  {_flavor_success}\n")
+
     try:
         notify_all(
             tech=winner.tech,
@@ -362,6 +371,7 @@ def clean_and_optimize_map(
             status_counts=status_counts,
             fallback_counts=fallback_counts,
             output_file=output_file,
+            flavor=_flavor_success,
         )
     except Exception as exc:
         logger.error("notify_all_failed reason=%s -- CSV will still be saved", exc)

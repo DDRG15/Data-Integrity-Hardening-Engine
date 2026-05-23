@@ -40,6 +40,7 @@ def _build_blocks(
     fallback_counts: dict[str, int],
     output_file: str,
     total: int,
+    flavor: str = "",
 ) -> list[dict]:
     ok_count = status_counts.get("ok", 0)
     emoji = _status_emoji(ok_count, total)
@@ -53,7 +54,7 @@ def _build_blocks(
         if fallback_counts else "none"
     )
 
-    return [
+    blocks = [
         {
             "type": "header",
             "text": {
@@ -91,6 +92,12 @@ def _build_blocks(
             ],
         },
     ]
+    if flavor:
+        blocks.append({
+            "type": "context",
+            "elements": [{"type": "mrkdwn", "text": f":sparkles: _{flavor}_"}],
+        })
+    return blocks
 
 
 def notify_recon_complete(
@@ -101,6 +108,7 @@ def notify_recon_complete(
     fallback_counts: dict[str, int],
     output_file: str,
     timeout: int = 8,
+    flavor: str = "",
 ) -> bool:
     """
     Sends a Seer Intelligence Report to Slack.
@@ -113,7 +121,7 @@ def notify_recon_complete(
         return False
 
     total = sum(status_counts.values())
-    blocks = _build_blocks(tech, strategy, gold_mine, status_counts, fallback_counts, output_file, total)
+    blocks = _build_blocks(tech, strategy, gold_mine, status_counts, fallback_counts, output_file, total, flavor)
 
     try:
         response = requests.post(

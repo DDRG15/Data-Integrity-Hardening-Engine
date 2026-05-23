@@ -8,6 +8,7 @@ def notify_all(
     status_counts: dict[str, int],
     fallback_counts: dict[str, int],
     output_file: str,
+    flavor: str = "",
 ) -> None:
     """Fires all configured notification channels. Skips unconfigured ones silently."""
     kwargs = dict(
@@ -17,6 +18,7 @@ def notify_all(
         status_counts=status_counts,
         fallback_counts=fallback_counts,
         output_file=output_file,
+        flavor=flavor,
     )
     slack_notifier.notify_recon_complete(**kwargs)
     discord_notifier.notify_recon_complete(**kwargs)
