@@ -51,14 +51,31 @@ Commit: `aab9254` — `test: expand coverage 67% -> 83% across all modules`
 
 - `CHANGELOG.md` — full version history from 1.0.0 to 4.0.0 with per-release notes
 - `docs/PROGRESS_LOG.md` — this file, cross-session tracking
-- `docs/AUDIT_2026-05-23.md` — 5W+How implementation log for all 6 audit findings
+- `docs/AUDIT_2026-05-23.md` — 5W+How audit log for all 6 MODE A findings
+
+### Phase 4 — GitHub Copilot Second Audit (3 findings)
+
+A second AI audit ran while the session was in progress. Copilot implemented SRE and DATA
+fixes directly; Claude implemented the SDET fix. All 3 findings closed same session.
+
+| # | Severity | Finding | Resolution |
+|---|---|---|---|
+| 1 | HIGH (SDET) | curlffi_probe 30%, playwright_probe 26% | `tests/test_probe_modules.py` — 19 tests, direct probe() calls, _AVAILABLE patching |
+| 2 | HIGH (SRE) | No input validation: --timeout 0 / --sample-size 0 silently accepted | Guards in `cli.py` (sys.exit 1) + `seer.py` (ValueError) |
+| 3 | MEDIUM (DATA) | CSV URL column not pre-filtered (nan strings, whitespace, blanks) | strip → replace nan→"" → replace ""→pd.NA → raise if all invalid |
+
+Full 5W+How for all 3 findings: [AUDIT_2026-05-23.md](AUDIT_2026-05-23.md#github-copilot-second-audit--2026-05-23-afternoon-cycle)
+
+Commit for SDET fix: `69646c1` — `test(SDET): probe module branch coverage -- requests_probe, curlffi, playwright`
 
 ---
 
-## Current State (end of 2026-05-23 session)
+## Current State (end of 2026-05-23 session — after Copilot audit cycle)
 
 ### Git log (local, not pushed)
 ```
+69646c1  test(SDET): probe module branch coverage -- requests_probe, curlffi, playwright
+[prev]   [Copilot commit — SRE + DATA fixes + 11 new tests]
 aab9254  test: expand coverage 67% -> 83% across all modules
 f49214d  audit(v4): fix 6 findings from MODE A review + 48-test suite
 8457d69  chore: untrack NEXT_SESSION.md + rewrite ROADMAP to V4.0
@@ -72,11 +89,11 @@ f3758dc  feat(recon): http_401/521 error codes + parallel probing via ThreadPool
 ...     [earlier commits — see CHANGELOG.md]
 ```
 
-**~15 commits ahead of origin/main.** Not pushed. User reviewing before GitHub push.
+**~17 commits ahead of origin/main.** Not pushed. User reviewing before GitHub push.
 
 ### Test suite
 ```
-124 passed, 0 warnings — 41s on Python 3.12.10 / Windows 10
+150 passed, 0 warnings — 28.83s on Python 3.12.10 / Windows 10
 ```
 
 ### Coverage summary
@@ -86,11 +103,12 @@ extraction/engine.py           91%   (146-164 requires 10k+ line fixture, accept
 notifications/__init__.py      100%
 notifications/discord.py       100%
 notifications/slack.py         100%
-recon/seer.py                   82%
+recon/seer.py                   83%
 sanitizer/core.py               87%   (104-115 = __main__ demo block)
-curlffi_probe.py                30%   (optional dep, not in CI env)
-playwright_probe.py             26%   (optional dep, not in CI env)
-TOTAL                           83%
+requests_probe.py              100%   (was 87%)
+curlffi_probe.py                90%   (was 30%; lines 14-15 = ImportError, acceptable)
+playwright_probe.py             91%   (was 26%; lines 14-15 = ImportError, acceptable)
+TOTAL                           89%   (was 83%)
 ```
 
 ---
@@ -101,16 +119,16 @@ TOTAL                           83%
 1. **Add secrets to GitHub repo** — Settings → Secrets → Actions:
    - `TEST_PYPI_API_TOKEN` — from test.pypi.org/manage/account/token/
    - `PYPI_API_KEY` — from pypi.org/manage/account/token/ (after deciding to publish)
-2. **User reviews all commits** — `git log --oneline` shows 15+ commits; review diffs
+2. **User reviews all commits** — `git log --oneline` shows 17+ commits; review diffs
 3. **Push** — `git push origin main`
 4. **CI badge** — goes green ~3 min after push (GitHub Actions runs pytest)
 5. **Real PyPI publish** — only after CI badge is green; requires new `PYPI_API_TOKEN` secret
 
 ### Nice-to-have before GitHub push
-- [ ] `test_extraction.py`: the `i % 10_000 == 0` disk/memory branch (146-164).
+- [x] `curlffi_probe.py` tests — done (90% coverage, ImportError branch acceptable gap)
+- [x] `playwright_probe.py` tests — done (91% coverage, ImportError branch acceptable gap)
+- [ ] `test_extraction.py`: the `i % 10_000 == 0` disk/memory branch (lines 146-164).
   Approach: refactor threshold to injectable parameter, or write 10,001 lines with `make_input_file`.
-- [ ] `curlffi_probe.py` tests: mock `curl_cffi` at the module level with `sys.modules` injection.
-- [ ] `playwright_probe.py` tests: same approach as curlffi.
 
 ### Post-push roadmap (from ROADMAP.md Tier 1)
 - FlareSolverr live test: `docker compose up -d flaresolverr` + add `FLARE_SOLVER_URL` to `.env`,
