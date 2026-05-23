@@ -72,7 +72,7 @@ def notify_recon_complete(
         "footer": {
             "text": f"dih-engine v4  |  {os.path.basename(output_file)}",
         },
-        "timestamp": datetime.datetime.utcnow().isoformat(),
+        "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat(),
     }
 
     try:
