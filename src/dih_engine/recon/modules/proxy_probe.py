@@ -16,12 +16,18 @@ SOCKS5 support requires: pip install "dih-engine[proxy]"
 """
 import logging
 import os
+import re
 
 import requests
 
 logger = logging.getLogger(__name__)
 
 _SCRAPFLY_ENDPOINT = "https://api.scrapfly.io/scrape"
+
+
+def _redact(text: str) -> str:
+    """Strips user:pass from proxy URLs before they appear in logs or CSV output."""
+    return re.sub(r"(https?://)[^:@/]+:[^@/]+@", r"\1***:***@", text)
 
 
 def _via_generic_proxy(url: str, proxy_url: str, timeout: int) -> dict:
@@ -37,8 +43,9 @@ def _via_generic_proxy(url: str, proxy_url: str, timeout: int) -> dict:
         logger.warning("proxy_http_error url=%s status=%d", url, code)
         return {"status": f"http_{code}", "html": "", "content_type": "", "error_detail": f"proxy: HTTP {code}"}
     except requests.exceptions.RequestException as exc:
-        logger.warning("proxy_failed url=%s reason=%s", url, exc)
-        return {"status": "http_other", "html": "", "content_type": "", "error_detail": f"proxy: {str(exc)[:120]}"}
+        safe = _redact(str(exc))
+        logger.warning("proxy_failed url=%s reason=%s", url, safe)
+        return {"status": "http_other", "html": "", "content_type": "", "error_detail": f"proxy: {safe[:120]}"}
 
 
 def _via_scrapfly(url: str, api_key: str, timeout: int) -> dict:

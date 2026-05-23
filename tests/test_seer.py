@@ -6,13 +6,17 @@ import requests
 
 from src.dih_engine.recon.modules.flaresolverr_probe import probe as flaresolverr_probe
 from src.dih_engine.recon.modules.proxy_probe import _via_generic_proxy, _via_scrapfly, probe as proxy_probe
+import pandas as pd
+
 from src.dih_engine.recon.seer import (
     ProbeResult,
     _build_probe_result,
     _disk_path,
     _identify_stack,
+    _is_valid_url,
     _majority_stack,
     analyze_tech_stack,
+    clean_and_optimize_map,
     locate_gold_mines,
 )
 
@@ -352,3 +356,103 @@ class TestProxyProbe:
         assert "curl_cffi" in result.error_detail
         assert "flaresolverr" in result.error_detail
         assert "proxy" in result.error_detail
+
+
+class TestUrlValidation:
+    def test_valid_http_url_passes(self):
+        assert _is_valid_url("http://example.com") is True
+
+    def test_valid_https_url_passes(self):
+        assert _is_valid_url("https://www.google.com/path?q=1") is True
+
+    def test_missing_scheme_fails(self):
+        assert _is_valid_url("example.com") is False
+
+    def test_missing_host_fails(self):
+        assert _is_valid_url("http://") is False
+
+    def test_not_a_url_fails(self):
+        assert _is_valid_url("N/A") is False
+
+    def test_invalid_url_status_returned_by_analyze(self):
+        result = analyze_tech_stack("not-a-url", session=None, _sleep_fn=_NO_SLEEP)
+        assert result.status == "invalid_url"
+        assert result.fallback_module == ""
+
+    def test_proxy_credentials_not_in_error_detail(self):
+        from src.dih_engine.recon.modules.proxy_probe import _via_generic_proxy
+        err = requests.exceptions.ConnectionError(
+            "HTTPSConnectionPool: Failed to establish connection to http://user:secret@proxy.host:8080"
+        )
+        with patch("src.dih_engine.recon.modules.proxy_probe.requests.get", side_effect=err):
+            result = _via_generic_proxy("http://target.com", "http://user:secret@proxy.host:8080", timeout=5)
+        assert "secret" not in result["error_detail"]
+        assert "***" in result["error_detail"]
+
+
+class TestCleanAndOptimizeMap:
+    def test_writes_csv_with_status_columns(self, tmp_path):
+        input_csv = tmp_path / "urls.csv"
+        input_csv.write_text("URL,Nombre Categoria\nhttps://example.com,Test\n")
+        output_csv = tmp_path / "output.csv"
+
+        ok_result = ProbeResult(
+            url="https://example.com", status="ok",
+            tech="Static HTML", strategy="BeautifulSoup", mines=["Found 5 <div>"],
+        )
+        with patch("src.dih_engine.recon.seer.analyze_tech_stack", return_value=ok_result), \
+             patch("src.dih_engine.recon.seer.notify_all"):
+            clean_and_optimize_map(str(input_csv), str(output_csv), request_timeout=10, sample_size=1)
+
+        df = pd.read_csv(str(output_csv))
+        assert "Status" in df.columns
+        assert "Error_Detail" in df.columns
+        assert "Fallback_Module" in df.columns
+        assert df.loc[df["URL"] == "https://example.com", "Status"].iloc[0] == "ok"
+
+    def test_non_probed_urls_get_not_probed_sentinel(self, tmp_path):
+        input_csv = tmp_path / "urls.csv"
+        input_csv.write_text("URL,Nombre Categoria\nhttps://a.com,A\nhttps://b.com,B\n")
+        output_csv = tmp_path / "output.csv"
+
+        ok_result = ProbeResult(
+            url="https://a.com", status="ok",
+            tech="Static HTML", strategy="BeautifulSoup", mines=[],
+        )
+        with patch("src.dih_engine.recon.seer.analyze_tech_stack", return_value=ok_result), \
+             patch("src.dih_engine.recon.seer.notify_all"):
+            clean_and_optimize_map(str(input_csv), str(output_csv), request_timeout=10, sample_size=1)
+
+        df = pd.read_csv(str(output_csv))
+        b_status = df.loc[df["URL"] == "https://b.com", "Status"].iloc[0]
+        assert b_status == "not_probed", f"expected 'not_probed', got {b_status!r}"
+
+    def test_missing_input_file_raises(self, tmp_path):
+        with pytest.raises(FileNotFoundError):
+            clean_and_optimize_map(str(tmp_path / "nope.csv"), str(tmp_path / "out.csv"))
+
+    def test_invalid_url_in_csv_gets_invalid_url_status(self, tmp_path):
+        input_csv = tmp_path / "urls.csv"
+        input_csv.write_text("URL,Nombre Categoria\nnot-a-url,Bad\n")
+        output_csv = tmp_path / "output.csv"
+
+        with patch("src.dih_engine.recon.seer.notify_all"):
+            clean_and_optimize_map(str(input_csv), str(output_csv), request_timeout=10, sample_size=1)
+
+        df = pd.read_csv(str(output_csv))
+        assert df.loc[df["URL"] == "not-a-url", "Status"].iloc[0] == "invalid_url"
+
+    def test_notification_failure_does_not_abort_csv_write(self, tmp_path):
+        input_csv = tmp_path / "urls.csv"
+        input_csv.write_text("URL,Nombre Categoria\nhttps://example.com,Test\n")
+        output_csv = tmp_path / "output.csv"
+
+        ok_result = ProbeResult(
+            url="https://example.com", status="ok",
+            tech="Static HTML", strategy="BeautifulSoup", mines=[],
+        )
+        with patch("src.dih_engine.recon.seer.analyze_tech_stack", return_value=ok_result), \
+             patch("src.dih_engine.recon.seer.notify_all", side_effect=Exception("channel down")):
+            clean_and_optimize_map(str(input_csv), str(output_csv), request_timeout=10, sample_size=1)
+
+        assert output_csv.exists(), "CSV must be written even when notifications fail"

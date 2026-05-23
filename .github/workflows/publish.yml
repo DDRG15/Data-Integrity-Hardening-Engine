@@ -1,9 +1,14 @@
 name: Publish to PyPI
 
+# Triggers on version tags: git tag v4.0.1 && git push --tags
 on:
   push:
     tags:
-      - "v*"   # triggers on: git tag v4.0.0 && git push --tags
+      - "v*"
+
+# Required secrets (set in GitHub repo Settings -> Secrets -> Actions):
+#   TEST_PYPI_API_TOKEN  -- from test.pypi.org/manage/account/token/
+#   PYPI_API_TOKEN       -- from pypi.org/manage/account/token/
 
 jobs:
   test:
@@ -19,37 +24,29 @@ jobs:
   publish-testpypi:
     needs: test
     runs-on: ubuntu-latest
-    environment: testpypi
-    permissions:
-      id-token: write   # OIDC trusted publishing (no token needed if configured)
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
-      - run: pip install build
+      - run: pip install build twine
       - run: python -m build
-      - uses: pypa/gh-action-pypi-publish@release/v1
-        with:
-          repository-url: https://test.pypi.org/legacy/
-          # Uses OIDC trusted publishing -- set up at test.pypi.org/manage/project/dih-engine/settings/
-          # Fallback: add secret TEST_PYPI_API_TOKEN and uncomment:
-          # password: ${{ secrets.TEST_PYPI_API_TOKEN }}
+      - run: twine upload --repository testpypi dist/*
+        env:
+          TWINE_USERNAME: __token__
+          TWINE_PASSWORD: ${{ secrets.TEST_PYPI_API_TOKEN }}
 
   publish-pypi:
     needs: publish-testpypi
     runs-on: ubuntu-latest
-    environment: pypi
-    permissions:
-      id-token: write
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
-      - run: pip install build
+      - run: pip install build twine
       - run: python -m build
-      - uses: pypa/gh-action-pypi-publish@release/v1
-        # Uses OIDC trusted publishing -- set up at pypi.org/manage/project/dih-engine/settings/
-        # Fallback: add secret PYPI_API_TOKEN and uncomment:
-        # password: ${{ secrets.PYPI_API_TOKEN }}
+      - run: twine upload dist/*
+        env:
+          TWINE_USERNAME: __token__
+          TWINE_PASSWORD: ${{ secrets.PYPI_API_TOKEN }}

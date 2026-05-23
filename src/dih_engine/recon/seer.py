@@ -14,6 +14,7 @@ Install optional extras to activate fallback modules:
   pip install "dih-engine[browser]"  # playwright
   pip install "dih-engine[full]"     # both
 """
+import concurrent.futures
 import logging
 import os
 import random
@@ -22,6 +23,7 @@ import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
 from typing import Optional
+from urllib.parse import urlparse
 
 import pandas as pd
 import psutil
@@ -50,6 +52,15 @@ class ProbeResult:
     mines: list[str] = field(default_factory=list)
     error_detail: str = ""
     fallback_module: str = ""
+
+
+def _is_valid_url(url: str) -> bool:
+    """Returns False for entries that would cause requests to raise InvalidSchema/MissingSchema."""
+    try:
+        p = urlparse(url)
+        return p.scheme in ("http", "https") and bool(p.netloc)
+    except Exception:
+        return False
 
 
 def _disk_path() -> str:
@@ -118,6 +129,10 @@ def analyze_tech_stack(
     _sleep_fn is injectable for testing -- production callers use the default.
     """
     logger.info("probing url=%s", url)
+
+    if not _is_valid_url(url):
+        logger.warning("invalid_url url=%s -- skipping probe", url)
+        return ProbeResult(url=url, status="invalid_url", error_detail="malformed URL -- missing scheme or host")
 
     fetch = requests_probe.probe(url, timeout=timeout, session=session, _sleep_fn=_sleep_fn)
     result = _build_probe_result(url, fetch)
@@ -235,23 +250,44 @@ def clean_and_optimize_map(
     def _probe(url: str) -> ProbeResult:
         return analyze_tech_stack(url, session=None, timeout=request_timeout)
 
+    # Worst-case per-URL: requests(T) + curl_cffi(T) + flaresolverr(T+60) + proxy(T+30) + jitter
+    # Divide by workers (parallel), add buffer. Prevents a hung socket from freezing the process.
+    _wall_clock = max(120, (len(sample_urls) * (request_timeout * 4 + 100)) // min(10, len(sample_urls)) + 60)
+
     all_results: list[ProbeResult] = []
     max_workers = min(10, len(sample_urls))
     with ThreadPoolExecutor(max_workers=max_workers) as pool:
         futures = {pool.submit(_probe, url): url for url in sample_urls}
-        for future in as_completed(futures):
-            url = futures[future]
-            try:
-                all_results.append(future.result())
-            except Exception as exc:
-                logger.error("probe_thread_failed url=%s reason=%s", url, exc)
-                all_results.append(ProbeResult(url=url, status="http_other", error_detail=str(exc)[:120]))
+        try:
+            for future in as_completed(futures, timeout=_wall_clock):
+                url = futures[future]
+                try:
+                    all_results.append(future.result())
+                except Exception as exc:
+                    logger.error("probe_thread_failed url=%s reason=%s", url, exc)
+                    all_results.append(ProbeResult(url=url, status="http_other", error_detail=str(exc)[:120]))
+        except concurrent.futures.TimeoutError:
+            logger.error("probe_pool_timeout wall_clock=%ds -- collecting partial results", _wall_clock)
+            done_urls = {r.url for r in all_results}
+            for future, url in futures.items():
+                if url in done_urls:
+                    continue
+                if future.done():
+                    try:
+                        all_results.append(future.result())
+                    except Exception as exc:
+                        all_results.append(ProbeResult(url=url, status="http_other", error_detail=str(exc)[:120]))
+                else:
+                    all_results.append(ProbeResult(
+                        url=url, status="timeout",
+                        error_detail=f"probe thread exceeded wall-clock limit of {_wall_clock}s",
+                    ))
 
     # Attach per-URL diagnostics to every row that was probed
     status_map = {r.url: r.status for r in all_results}
     error_map = {r.url: r.error_detail for r in all_results}
     fallback_map_col = {r.url: r.fallback_module for r in all_results}
-    df["Status"] = df["URL"].map(status_map).fillna("")
+    df["Status"] = df["URL"].map(status_map).fillna("not_probed")
     df["Error_Detail"] = df["URL"].map(error_map).fillna("")
     df["Fallback_Module"] = df["URL"].map(fallback_map_col).fillna("")
 
@@ -296,14 +332,17 @@ def clean_and_optimize_map(
     print(f"   Fallback needed: {fallback_str}")
     print("=" * 60 + "\n")
 
-    notify_all(
-        tech=winner.tech,
-        strategy=winner.strategy,
-        gold_mine=winner.mines[0] if winner.mines else "n/a",
-        status_counts=status_counts,
-        fallback_counts=fallback_counts,
-        output_file=output_file,
-    )
+    try:
+        notify_all(
+            tech=winner.tech,
+            strategy=winner.strategy,
+            gold_mine=winner.mines[0] if winner.mines else "n/a",
+            status_counts=status_counts,
+            fallback_counts=fallback_counts,
+            output_file=output_file,
+        )
+    except Exception as exc:
+        logger.error("notify_all_failed reason=%s -- CSV will still be saved", exc)
 
     df.to_csv(output_file, index=False)
     logger.info("master_plan_saved path=%s rows=%d", output_file, len(df))
