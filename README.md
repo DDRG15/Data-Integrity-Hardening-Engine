@@ -189,24 +189,31 @@ Copy `.env.example` to `.env` and set values before running.
 ```
 src/dih_engine/
 ├── extraction/
-│   ├── engine.py          # Main processing loop + resource monitoring
-│   └── patterns.py        # Compiled regex and OCR correction maps
+│   ├── engine.py               # Main processing loop + resource monitoring
+│   └── patterns.py             # Compiled regex and OCR correction maps
 ├── sanitizer/
-│   └── core.py            # DataSanitizer class
+│   └── core.py                 # DataSanitizer class
 ├── recon/
-│   ├── seer.py            # Orchestrator: probe -> classify -> fallback -> notify
-│   ├── error_taxonomy.py  # Maps error codes to fallback module names
+│   ├── seer.py                 # Orchestrator: probe -> classify -> fallback -> notify
+│   ├── error_taxonomy.py       # Maps error codes to fallback module names
+│   ├── loading_messages.py     # CLI flavor text: waiting / success / failure phrases
 │   └── modules/
-│       ├── requests_probe.py   # Default HTTP probe (always available)
-│       ├── curlffi_probe.py    # TLS fingerprint bypass [pip install dih-engine[tls]]
-│       └── playwright_probe.py # Headless browser [pip install dih-engine[browser]]
+│       ├── requests_probe.py       # Default HTTP probe (always available)
+│       ├── curlffi_probe.py        # TLS fingerprint bypass [dih-engine[tls]]
+│       ├── playwright_probe.py     # Headless browser [dih-engine[browser]]
+│       ├── flaresolverr_probe.py   # Self-hosted Cloudflare solver (no account needed)
+│       └── proxy_probe.py          # HTTP/SOCKS5 or Scrapfly rotation [dih-engine[proxy]]
 └── notifications/
     ├── slack_notifier.py       # Slack Block Kit report
     └── discord_notifier.py     # Discord rich embed report
 tests/
-├── test_extraction.py
-├── test_sanitizer.py
-└── test_seer.py
+├── test_extraction.py          # Extraction engine + edge cases
+├── test_sanitizer.py           # DataSanitizer APPROVED/PARTIAL/REJECTED paths
+├── test_seer.py                # Full recon orchestrator + fallback chain
+├── test_seer_followups.py      # Thread-pool timeout + FlareSolverr error paths
+├── test_probe_modules.py       # Direct probe() coverage: requests, curlffi, playwright
+├── test_cli.py                 # CLI argument parsing + sys.exit codes
+└── test_notifications.py       # Slack + Discord notifiers
 ```
 
 ---
@@ -222,7 +229,8 @@ The engine is production-ready for its current scope. The following are delibera
 | Medium | **Locale-aware amount normalization** | Handle European format `1.234,50` via locale detection before OCR correction |
 | Medium | **Playwright live validation** | End-to-end test for `js_required` detection against real CSR-only pages |
 | Low | **Streaming extraction** | Pipeline output as a generator instead of collecting all records in memory |
-| Low | **Test coverage > 80%** | Current 57% reflects intentional prioritization of integration tests over mocks for HTTP-probe code |
+| Medium | **Exponential backoff in `delay_retry`** | Replace fixed 5-12s random sleep with base 5s, multiplier 2x, cap 60s — sites that 429 deserve a real backoff |
+| Low | **~~Test coverage > 80%~~** | **Done — 93%, 162 tests** |
 
 ---
 
@@ -252,7 +260,13 @@ handles this automatically. Future: `aiohttp` for true async I/O.
 
 ## Changelog
 
-**V4.0 (current)**
+**V4.1 (current)**
+- Added: loading-screen flavor text (`loading_messages.py`) -- waiting / success / failure phrases forwarded to CLI, Slack, and Discord
+- Added: strict URL schema validation -- rejects entries missing `http://` or `https://` before probing
+- Hardened: CLI + programmatic input validation for all numeric parameters
+- Tests: 162 tests, 93% coverage (was 124 tests, 83%)
+
+**V4.0**
 - Added: `ProbeResult` dataclass replaces raw tuples -- every URL gets a typed result
 - Added: error taxonomy (`error_taxonomy.py`) -- maps failure codes to fallback modules
 - Added: modular fallback chain -- `requests` -> `curl_cffi` -> `flaresolverr` -> `proxy`

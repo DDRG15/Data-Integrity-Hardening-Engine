@@ -5,6 +5,41 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [4.1.0] — 2026-05-23
+
+### Added
+- **Loading-screen flavor text** (`recon/loading_messages.py`): 41 waiting phrases, 8 success
+  phrases, 9 failure phrases — hamsters, pylons, Vim interns, and rubber ducks. Displayed in the
+  CLI at three moments: while the ThreadPoolExecutor probes, on success after the Intelligence
+  Report, and on all-probes-failed. Success phrase forwarded to Slack (`:sparkles:` context block)
+  and Discord (embed footer text).
+- **Strict URL schema validation** in `clean_and_optimize_map()`: rejects any URL not matching
+  `^https?://` before sampling. `ValueError` lists the first 5 bad values so the caller/CI sees
+  exactly what's wrong.
+
+### Hardened
+- **CLI input validation** (`cli.py`): `--timeout ≤ 0`, `--sample-size ≤ 0`,
+  `--pause-threshold` outside (0, 100), `--disk-threshold` outside (0, 100) now exit 1 with a
+  clear `error:` message instead of silently misbehaving or causing division-by-zero downstream.
+- **Programmatic input validation** (`seer.py`): `clean_and_optimize_map()` raises `ValueError`
+  for `request_timeout ≤ 0` or `sample_size ≤ 0` when called directly (not via CLI).
+- **URL column pre-filter** (`seer.py`): strips whitespace, replaces `"nan"` strings with
+  `pd.NA`, raises `ValueError` when the entire URL column is blank after normalization.
+
+### Tests
+- **162 tests, 0 warnings. Coverage: 93% overall** (was 124 tests, 83%).
+- `test_probe_modules.py` (19 tests, new file): direct `probe()` calls on `requests_probe`,
+  `curlffi_probe`, `playwright_probe` with patched library internals. `requests_probe` 87% → 100%,
+  `curlffi_probe` 30% → 90%, `playwright_probe` 26% → 91%.
+- `test_seer_followups.py` (2 tests, new file): thread-pool timeout partial-result path via
+  `FakeExecutor` + `concurrent.futures.TimeoutError`; FlareSolverr JSON `status=error` path.
+- `test_seer.py` additions (+12 tests): playwright fallback success, delay_retry success,
+  full curl_cffi → flaresolverr → proxy three-level chain; Scrapfly 401/429/503/exception error
+  branches; proxy routing preference; invalid URL in CSV now expects `ValueError`.
+- `proxy_probe.py`: 74% → **100%**. `seer.py`: 83% → **90%**.
+
+---
+
 ## [4.0.0] — 2026-05-23
 
 ### Added
@@ -126,13 +161,15 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 | 2.0.0 | — | — |
 | 3.1.0 | — | — |
 | 3.2.0 | ~28 | ~55% |
-| 4.0.0 | **124** | **83%** |
+| 4.0.0 | 124 | 83% |
+| 4.1.0 | **162** | **93%** |
 
-## Remaining coverage gaps (as of 4.0.0)
+## Remaining coverage gaps (as of 4.1.0)
 
 | File | Uncovered lines | Reason |
 |---|---|---|
 | `engine.py:146-164` | Disk/memory mid-run check | Requires 10,001+ lines in test fixture; not worth the fixture size |
-| `curlffi_probe.py:14-15,23-40` | curl_cffi import + probe body | Optional dep not installed in CI env; tested via integration |
-| `playwright_probe.py:14-15,23-43` | playwright import + probe body | Optional dep not installed in CI env; tested via integration |
+| `curlffi_probe.py:14-15` | ImportError branch | Library is installed in this env; branch only fires when `curl-cffi` is absent |
+| `playwright_probe.py:14-15` | ImportError branch | Library is installed in this env; branch only fires when `playwright` is absent |
 | `sanitizer/core.py:104-115` | `__main__` block | CLI-level demo, not production code |
+| `seer.py` (~10%) | Various fallback/console branches | Wall-clock timeout partial-result path + some print branches |
