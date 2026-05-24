@@ -5,6 +5,37 @@ Each session entry is self-contained — no need to read earlier entries to unde
 
 ---
 
+## Session 2026-05-24 (Saturday) — CI Fix (V4.1.1)
+
+**Status when session started:** V4.1.0 pushed to GitHub. All 3 CI matrix jobs failed immediately
+(exit code 1, ~30s total — too fast for 162 tests, indicating a collection-time crash).
+
+**Root cause:** Two bugs that only surface when optional deps (`curl-cffi`, `playwright`) are absent.
+
+1. `curlffi_probe.py` / `playwright_probe.py`: The `except ImportError` block only set `_AVAILABLE = False`.
+   The library name (`cffi_requests` / `sync_playwright`) was never assigned in that branch.
+   When CI runs without the deps, `unittest.mock.patch("...curlffi_probe.cffi_requests")` raises
+   `AttributeError` — the attribute doesn't exist in the module namespace so `patch()` has nothing
+   to target. All probe tests in `test_probe_modules.py` fail at test setup.
+
+2. `pyproject.toml`: No `pythonpath = ["."]` in `[tool.pytest.ini_options]`. Without this the
+   project root is not guaranteed to be on `sys.path`, making `from src.dih_engine...` imports
+   unreliable on CI runners vs. local (where CWD happens to be the root).
+
+**Fix (commit `3e020d5`):**
+- `curlffi_probe.py`: `cffi_requests = None` in `except ImportError`
+- `playwright_probe.py`: `sync_playwright = None` in `except ImportError`
+- `pyproject.toml`: `pythonpath = ["."]` added to `[tool.pytest.ini_options]`
+
+162 tests pass locally (unchanged). Pushed. CI re-triggered.
+
+---
+
+**Docs updated this session:** CHANGELOG.md (V4.1.1 entry + gaps table), README.md (Changelog
+section), pyproject.toml (version 4.1.0 → 4.1.1), PROGRESS_LOG.md (this entry).
+
+---
+
 ## Session 2026-05-23 (Sunday) — Audit + Coverage Expansion
 
 **Status when session started:** V4.0.0 fully implemented and committed. Seer had parallel

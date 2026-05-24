@@ -5,6 +5,21 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [4.1.1] — 2026-05-24
+
+### Fixed
+- **CI green on all Python versions** (`curlffi_probe.py`, `playwright_probe.py`): Optional library
+  names (`cffi_requests`, `sync_playwright`) were only defined when the library was installed.
+  `unittest.mock.patch()` raised `AttributeError` in CI environments where `curl-cffi` and
+  `playwright` are absent — the name doesn't exist in the module namespace, so `patch()` has
+  nothing to target. Added `= None` sentinel in each `except ImportError` block so `patch()` can
+  always locate and replace the attribute regardless of installation state.
+- **pytest `pythonpath` setting** (`pyproject.toml`): Added `pythonpath = ["."]` to
+  `[tool.pytest.ini_options]` so the project root is explicitly on `sys.path` in all runner
+  environments, making `from src.dih_engine...` imports reliable in CI (not just locally).
+
+---
+
 ## [4.1.0] — 2026-05-23
 
 ### Added
@@ -162,14 +177,15 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 | 3.1.0 | — | — |
 | 3.2.0 | ~28 | ~55% |
 | 4.0.0 | 124 | 83% |
-| 4.1.0 | **162** | **93%** |
+| 4.1.0 | 162 | 93% |
+| 4.1.1 | **162** | **93%** |
 
-## Remaining coverage gaps (as of 4.1.0)
+## Remaining coverage gaps (as of 4.1.1)
 
 | File | Uncovered lines | Reason |
 |---|---|---|
 | `engine.py:146-164` | Disk/memory mid-run check | Requires 10,001+ lines in test fixture; not worth the fixture size |
-| `curlffi_probe.py:14-15` | ImportError branch | Library is installed in this env; branch only fires when `curl-cffi` is absent |
-| `playwright_probe.py:14-15` | ImportError branch | Library is installed in this env; branch only fires when `playwright` is absent |
+| `curlffi_probe.py:14-16` | ImportError branch (local only) | `curl-cffi` is installed locally so the except block never runs; covered in CI where the library is absent |
+| `playwright_probe.py:14-16` | ImportError branch (local only) | `playwright` is installed locally so the except block never runs; covered in CI where the library is absent |
 | `sanitizer/core.py:104-115` | `__main__` block | CLI-level demo, not production code |
 | `seer.py` (~10%) | Various fallback/console branches | Wall-clock timeout partial-result path + some print branches |

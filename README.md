@@ -260,7 +260,11 @@ handles this automatically. Future: `aiohttp` for true async I/O.
 
 ## Changelog
 
-**V4.1 (current)**
+**V4.1.1 (current)**
+- Fixed: CI green on all Python versions -- `cffi_requests` / `sync_playwright` now assigned `None` in `except ImportError` so `patch()` works when optional deps are absent
+- Fixed: `pythonpath = ["."]` added to pytest config -- `from src.dih_engine` imports reliable in all runner environments
+
+**V4.1**
 - Added: loading-screen flavor text (`loading_messages.py`) -- waiting / success / failure phrases forwarded to CLI, Slack, and Discord
 - Added: strict URL schema validation -- rejects entries missing `http://` or `https://` before probing
 - Hardened: CLI + programmatic input validation for all numeric parameters
