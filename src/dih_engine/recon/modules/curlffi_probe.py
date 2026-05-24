@@ -12,6 +12,7 @@ try:
     from curl_cffi import requests as cffi_requests
     _AVAILABLE = True
 except ImportError:
+    cffi_requests = None  # type: ignore[assignment]
     _AVAILABLE = False
 
 

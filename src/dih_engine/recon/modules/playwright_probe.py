@@ -12,6 +12,7 @@ try:
     from playwright.sync_api import sync_playwright
     _AVAILABLE = True
 except ImportError:
+    sync_playwright = None  # type: ignore[assignment]
     _AVAILABLE = False
 
 
