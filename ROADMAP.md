@@ -83,8 +83,11 @@ request-response. If stream processing becomes a requirement, it is a separate
 architectural decision affecting the storage layer, worker model, and billing model —
 treated as a distinct initiative, not a feature added to this engine.
 
-LLM-based OCR correction is not planned. Two reasons, both terminal: (1) client data
-may be private or regulated and must never leave the machine for an external LLM API;
-(2) determinism is this product's contract — the same input must always produce the
-same output, and an LLM cannot sign that. Correction stays rule-based; ambiguity
-resolution belongs to master-list reconciliation (see Tier 1), not to a model.
+LLM-based OCR correction is off by default — hardened posture. Two reasons: (1) client
+data may be private or regulated and must never leave the machine for an external LLM
+API; (2) determinism is this product's contract — the same input must always produce
+the same output, and an LLM cannot sign that. It only becomes implementable as an
+explicit opt-in module when a client approves it in writing for their data (their own
+LLM, their API keys, their data policy) — never the default path, never silent.
+Correction stays rule-based; ambiguity resolution belongs to master-list
+reconciliation (see Tier 1), not to a model.
