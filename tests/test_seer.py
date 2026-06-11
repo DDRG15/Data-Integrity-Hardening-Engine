@@ -728,3 +728,93 @@ class TestExponentialBackoff:
         assert result.status == "timeout"
         assert result.fallback_module == "delay_retry"
         assert "HTTP 403" in result.error_detail
+
+
+from src.dih_engine.recon.seer import _HostCircuitBreaker, CIRCUIT_BREAKER_THRESHOLD
+
+
+class TestHostCircuitBreaker:
+    """Per-host circuit breaker: opens after 3 terminal failures, scoped to one run."""
+
+    def test_opens_after_threshold_terminal_failures(self):
+        breaker = _HostCircuitBreaker()
+        for _ in range(CIRCUIT_BREAKER_THRESHOLD):
+            breaker.record("https://blocked.com/page", "http_403")
+        assert breaker.is_open("https://blocked.com/other-page") is True
+
+    def test_transient_failures_never_strike(self):
+        breaker = _HostCircuitBreaker()
+        for status in ("http_429", "timeout", "js_required", "http_other", "module_unavailable"):
+            for _ in range(5):
+                breaker.record("https://slow.com/page", status)
+        assert breaker.is_open("https://slow.com/page") is False
+
+    def test_success_resets_accumulated_strikes(self):
+        breaker = _HostCircuitBreaker()
+        breaker.record("https://flaky.com/a", "http_403")
+        breaker.record("https://flaky.com/b", "ssl_error")
+        breaker.record("https://flaky.com/c", "ok")  # host recovered
+        breaker.record("https://flaky.com/d", "http_403")
+        breaker.record("https://flaky.com/e", "http_403")
+        assert breaker.is_open("https://flaky.com/f") is False  # 2 < threshold after reset
+
+    def test_hosts_are_isolated(self):
+        breaker = _HostCircuitBreaker()
+        for _ in range(CIRCUIT_BREAKER_THRESHOLD):
+            breaker.record("https://dead.com/x", "connection_error")
+        assert breaker.is_open("https://dead.com/y") is True
+        assert breaker.is_open("https://healthy.com/x") is False
+
+    def test_run_skips_remaining_urls_of_blocked_host(self, tmp_path, monkeypatch):
+        # 5 URLs on one host, every probe returns terminal 403. A serial executor
+        # makes ordering deterministic: URLs 1-3 strike, URLs 4-5 must be skipped
+        # without any probe call.
+        class _SerialFuture:
+            def __init__(self, fn, url):
+                self._result = fn(url)
+
+            def done(self):
+                return True
+
+            def result(self):
+                return self._result
+
+        class _SerialExecutor:
+            def __init__(self, *args, **kwargs):
+                pass
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, tb):
+                return False
+
+            def submit(self, fn, url):
+                return _SerialFuture(fn, url)
+
+        input_csv = tmp_path / "urls.csv"
+        rows = "\n".join(f"https://walled.com/p{i},Cat" for i in range(1, 6))
+        input_csv.write_text(f"URL,Nombre Categoria\n{rows}\n")
+        output_csv = tmp_path / "output.csv"
+
+        probed_urls = []
+
+        def _fake_analyze(url, session=None, timeout=10):
+            probed_urls.append(url)
+            return ProbeResult(url=url, status="http_403", error_detail="HTTP 403", fallback_module="curl_cffi")
+
+        monkeypatch.setattr("src.dih_engine.recon.seer.ThreadPoolExecutor", _SerialExecutor)
+        monkeypatch.setattr(
+            "src.dih_engine.recon.seer.as_completed",
+            lambda futures, timeout=None: iter(list(futures)),
+        )
+        monkeypatch.setattr("src.dih_engine.recon.seer.analyze_tech_stack", _fake_analyze)
+
+        with patch("src.dih_engine.recon.seer.notify_all"):
+            clean_and_optimize_map(str(input_csv), str(output_csv), request_timeout=5, sample_size=5)
+
+        assert len(probed_urls) == 3  # circuit opened after the 3rd strike
+        df = pd.read_csv(str(output_csv))
+        statuses = df["Status"].tolist()
+        assert statuses.count("http_403") == 3
+        assert statuses.count("skipped_circuit_open") == 2

@@ -19,6 +19,7 @@ import logging
 import os
 import random
 import sys
+import threading
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
@@ -49,6 +50,51 @@ BACKOFF_BASE = 5.0
 BACKOFF_MULTIPLIER = 2.0
 BACKOFF_CAP = 60.0
 BACKOFF_MAX_RETRIES = 3
+
+# Statuses that prove the host itself is blocking or dead, not a transient glitch.
+# http_403 here means the full fallback chain was already exhausted for that URL.
+_CIRCUIT_STRIKE_STATUSES = frozenset({"http_403", "http_401", "ssl_error", "connection_error"})
+CIRCUIT_BREAKER_THRESHOLD = 3
+
+
+class _HostCircuitBreaker:
+    """
+    Per-host circuit breaker, scoped to a single recon run.
+
+    A catalog CSV routinely carries dozens of URLs on one domain. Once a host
+    has produced CIRCUIT_BREAKER_THRESHOLD terminal failures, every further
+    probe against it buys the same answer at full price: another exhausted
+    fallback chain, more wall-clock time, and a worse IP reputation with that
+    WAF. The breaker stops paying; remaining URLs of that host are written to
+    the CSV as "skipped_circuit_open" without a single network call.
+
+    With 10 parallel workers the first wave of URLs for a blocked host may all
+    launch before any strike lands -- the breaker cannot prevent that first
+    wave, it caps the damage from the second wave onward.
+    """
+
+    def __init__(self, threshold: int = CIRCUIT_BREAKER_THRESHOLD):
+        self._threshold = threshold
+        self._strikes: dict[str, int] = {}
+        self._lock = threading.Lock()
+
+    @staticmethod
+    def _host(url: str) -> str:
+        return urlparse(url).netloc.lower()
+
+    def is_open(self, url: str) -> bool:
+        with self._lock:
+            return self._strikes.get(self._host(url), 0) >= self._threshold
+
+    def record(self, url: str, status: str) -> None:
+        host = self._host(url)
+        with self._lock:
+            if status in _CIRCUIT_STRIKE_STATUSES:
+                self._strikes[host] = self._strikes.get(host, 0) + 1
+                if self._strikes[host] == self._threshold:
+                    logger.warning("circuit_open host=%s strikes=%d", host, self._threshold)
+            elif status == "ok":
+                self._strikes.pop(host, None)
 
 
 @dataclass
@@ -289,9 +335,21 @@ def clean_and_optimize_map(
     _flavor_wait = loading_messages.waiting()
     print(f"\n  {_flavor_wait}\n")
 
+    breaker = _HostCircuitBreaker()
+
     # Each thread gets its own session -- requests.Session is not thread-safe.
     def _probe(url: str) -> ProbeResult:
-        return analyze_tech_stack(url, session=None, timeout=request_timeout)
+        if breaker.is_open(url):
+            host = urlparse(url).netloc
+            logger.info("circuit_skip url=%s host=%s", url, host)
+            return ProbeResult(
+                url=url,
+                status="skipped_circuit_open",
+                error_detail=f"circuit open for {host}: {CIRCUIT_BREAKER_THRESHOLD} terminal failures this run",
+            )
+        result = analyze_tech_stack(url, session=None, timeout=request_timeout)
+        breaker.record(url, result.status)
+        return result
 
     # Worst-case per-URL: requests(T) + curl_cffi(T) + flaresolverr(T+60) + proxy(T+30) + jitter
     # Divide by workers (parallel), add buffer. Prevents a hung socket from freezing the process.
