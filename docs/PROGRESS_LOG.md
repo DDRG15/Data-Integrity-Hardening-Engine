@@ -57,6 +57,17 @@ Full `git log` scan for Co-Authored-By / Claude / Anthropic: **clean, zero trace
 - 6 new tests (TestAmountLocaleNormalization incl. date-like 12.06.26 exclusion).
   **177 tests, 93% coverage, 0 warnings. All Tier 1 code items now closed.**
 
+### Phase 3a — FastAPI scaffold: auth + /sanitize (commit `f120fde`) — TIER 2 BEGINS
+- New `dih_engine.api` package: `create_app()` factory, `GET /health` (no auth),
+  `POST /sanitize` behind `X-API-Key` (env `DIH_API_KEY`, compare_digest).
+- Fail-closed auth: missing server key = 503 on data routes, never an open API.
+  Health stays unauthenticated (probes can't carry secrets; 503 = restart loop).
+- Response taxonomy adds NOISE. Line cap 10k chars (bigger belongs to /extract).
+- Deps: `[api]` extra; fastapi/httpx in requirements-dev (CI collection lesson).
+  Targeted filterwarnings for starlette's legacy multipart shim.
+- Run server: `uvicorn "dih_engine.api:create_app" --factory`
+- 11 new tests (test_api.py). **188 tests, 0 warnings.**
+
 ### Next phases (planned order)
 - Tier 1 backlog (added 2026-06-10): `--retry` second-pass flag (re-probe only non-ok
   rows of a previous output CSV — deferred re-run instead of in-process standby);
