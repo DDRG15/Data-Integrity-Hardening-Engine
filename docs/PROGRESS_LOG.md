@@ -31,12 +31,34 @@ Full `git log` scan for Co-Authored-By / Claude / Anthropic: **clean, zero trace
 - 4 new tests (`TestExponentialBackoff`). **166 tests, 93% coverage, 0 warnings.**
 - ROADMAP Tier 1 checkbox flipped to done.
 
+### Housekeeping (same session)
+- Copilot residual artifacts deleted (claude_builder_plan.md + 2 .apply_patch.txt) —
+  their changes live in commit history; the files were dead weight. User decision.
+- Note: Copilot's May audit downgraded to low-trust by user. Its committed code stays
+  (tested, green) but its findings carry no authority in future decisions.
+- File audit vs remote done: nothing private tracked; .env / PRIVATE_README / PITCH /
+  NEXT_SESSION correctly ignored. Co-author audit: full history clean, zero traces.
+
+### Phase 1b — Per-host circuit breaker (commit `f863ffe`)
+- `_HostCircuitBreaker` in seer.py: after 3 terminal failures (http_403/401,
+  ssl_error, connection_error) from one host, remaining URLs of that host get
+  `skipped_circuit_open` in the CSV without a network call. Lock-guarded (10 workers).
+  Success resets strikes; transient statuses (429/timeout/js_required) never strike.
+- Rationale: catalog CSVs carry many URLs per domain; without the breaker every URL
+  of a blocked host re-pays the full exhausted fallback chain + IP reputation damage.
+- 5 new tests (TestHostCircuitBreaker incl. end-to-end serial-executor skip).
+  **171 tests, 93% coverage, 0 warnings.**
+
 ### Next phases (planned order)
 - Phase 2: locale-aware amount normalization (`1.234,50` European format) in sanitizer
+- Tier 1 backlog (added 2026-06-10): `--retry` second-pass flag (re-probe only non-ok
+  rows of a previous output CSV — deferred re-run instead of in-process standby);
+  `@pytest.mark.live` smoke tests against httpbin.org (excluded from CI, run manually)
 - Phase 3a-3e: FastAPI scaffold (Tier 2): app + /sanitize -> /extract -> job store +
   /jobs/{id} -> API key auth -> Docker + docs
 - Milestone close: version 4.2.0 + CHANGELOG/README/ROADMAP/PRIVATE_README/PITCH refresh
-- Pending user: PyPI password reset -> GitHub secrets -> publish. File audit before any push.
+- Pending user: PyPI password reset -> GitHub secrets -> publish. NO PUSH this session
+  without explicit green light (file audit done, ready when user is).
 
 ---
 
