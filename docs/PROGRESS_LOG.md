@@ -74,16 +74,31 @@ Full `git log` scan for Co-Authored-By / Claude / Anthropic: **clean, zero trace
 - Disk abort -> 507 (never a silent 200 with empty records). 5 MB sync cap.
 - 5 new tests. **193 tests, 0 warnings.**
 
-### Phase 3c — Async jobs (commit `101cb29`) — SESSION PAUSED HERE (user token limit)
+### Phase 3c — Async jobs (commit `101cb29`)
 - POST /extract/async (202 + job_id) + GET /jobs/{id}. In-memory JobStore,
   2 workers, evicts finished >100, never evicts in-flight. Redis = Tier 3
   trigger (second instance behind LB), documented in jobs.py.
-- API suite 21/21 green. Full suite NOT re-run before pause (api tests green,
-  no non-api files touched in 3c -- expected 198 total).
-- **RESUME POINT:** (1) run full suite to confirm 198; (2) milestone close:
-  version 4.2.0 + CHANGELOG + README + ROADMAP + PRIVATE_README + PITCH;
-  (3) remaining Tier 2: Dockerfile/compose entry for API + deploy to
-  Railway/Render (needs user account); (4) push pending user green light.
+
+### Phase 3c VERIFIED (not assumed) + Milestone 4.2.0 close (commit `268f581`)
+- Per user instruction "no se asume nada": ran the FULL suite after 3c, not just
+  the API tests. Result: **198 passed, 94% coverage, 0 warnings.** 3c integrates
+  clean -- no rewrite needed.
+- Version 4.1.1 -> 4.2.0 (pyproject). CHANGELOG [4.2.0] entry. README: new API
+  Service section, structure/roadmap/changelog/config updated, European-separator
+  limitation resolved into a documented capability. ROADMAP: Tier 2 scaffold
+  shipped, Tier 1 backoff/breaker/locale marked done.
+- Dockerfile.api (uvicorn server, port 8000, /health healthcheck, [api] extra,
+  non-root) + docker-compose `api` service (fail-closed DIH_API_KEY) + .env.example.
+- PRIVATE_README.md and PITCH.md refreshed to 4.2.0 (gitignored, not committed).
+- Working tree clean. Private files confirmed ignored via git check-ignore.
+
+### Session state (2026-06-10, autonomous run while user away)
+- **10 commits ahead of origin/main, NOT pushed.** Awaiting user green light.
+- NOT done (needs user / external): real PyPI publish (account locked), deploy to
+  Railway/Render (needs hosting account), Dockerfile.api build verification (no
+  docker run in this env -- image defined but not built/run here).
+- **RESUME POINT next session:** decide push; then deploy path or Tier 3 (Redis
+  job store, aiohttp async, --retry flag, live smoke tests).
 
 ### Next phases (planned order)
 - Tier 1 backlog (added 2026-06-10): `--retry` second-pass flag (re-probe only non-ok
