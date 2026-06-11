@@ -224,6 +224,19 @@ Copy `.env.example` to `.env` and set values before running.
 | `DISCORD_WEBHOOK_URL` | string | — | Discord webhook URL |
 | `DIH_API_KEY` | string | — | Required by every API data route; unset = `503` (fail-closed) |
 
+No hand-editing required — manage everything with the `config` subcommand:
+
+```bash
+dih-engine config list                  # status, masked value, set/rotation dates, provider
+dih-engine config set SCRAPFLY_API_KEY  # hidden prompt -- value never echoed
+dih-engine config set SCRAPFLY_API_KEY --provider "Scrapfly free tier"
+dih-engine config unset SCRAPFLY_API_KEY  # key expired or provider changed
+```
+
+Secret values are never printed: `list` shows `****` + the last 4 characters, plus the
+date each key was set and last rotated (`.env.meta.json`, gitignored). Unknown variable
+names are rejected — a typo'd var is an hour of debugging a silent `503`.
+
 > **Logging:** This is a library -- it does not configure logging internally. Call `logging.basicConfig(level=logging.DEBUG)` in your own script before importing.
 
 ---
@@ -321,7 +334,11 @@ instance. The moment a second instance runs behind a load balancer, `GET /jobs/{
 
 ## Changelog
 
-**V4.2.0 (current)**
+**V4.3.0 (current)**
+- Added: `dih-engine config` -- list/set/unset .env credentials with hidden prompts, masked display (`****` + last 4), set/rotation dates, and provider labels. Atomic writes, typo and injection protection. Values never echoed.
+- Tests: 219 tests, 94% coverage (was 198)
+
+**V4.2.0**
 - Added: Tier 2 API service (`dih-engine[api]`) -- `/health`, `/sanitize`, `/extract`, `/extract/async`, `/jobs/{id}` with fail-closed `X-API-Key` auth
 - Added: exponential backoff in `delay_retry` -- base 5s, 2x, cap 60s, jitter, aborts on error-class change
 - Added: per-host circuit breaker -- skips remaining URLs of a host after 3 terminal failures

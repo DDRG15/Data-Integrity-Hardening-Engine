@@ -102,6 +102,24 @@ Full `git log` scan for Co-Authored-By / Claude / Anthropic: **clean, zero trace
   /extract audit 3/2/1, async job queued->done. The one "not verified" item from
   the milestone is now verified. Test container removed.
 
+### V4.2.0 PUSHED (2026-06-11)
+- Pre-push audit done at user request: full diff vs remote, file-by-file list,
+  gitignore/dockerignore contrast, requirements check (all aligned), reading-docs
+  double-check (ARCHITECTURE.md was the one stale file -- updated with API module
+  boundary + V4.2 decisions before push). Co-author audit re-confirmed clean.
+- Pushed `4e3a6e3..4a1099a` (19 commits) on explicit user green light.
+
+### Phase 4.3 — dih-engine config (commits `3341f2a` + release docs)
+- User idea: clients should not hunt placeholders to enter credentials. Hardened
+  counter-proposal accepted: CLI subcommand instead of local HTML (a web form with
+  write-access to .env is an attack surface; the CLI gives the same flow with none).
+  HTML can mount on config_store.py later if wanted for non-technical clients.
+- `config list` (masked ****last4 + dates + provider), `config set` (hidden getpass),
+  `config unset`. Metadata in .env.meta.json (git+docker ignored). Atomic writes,
+  unknown-name rejection, multiline-injection rejection, comments preserved.
+- 21 new tests incl. json.dumps secret-absence assertions. **219 tests, 0 warnings.**
+- Version 4.2.0 -> 4.3.0. CHANGELOG/README/ROADMAP updated.
+
 ### Session state (2026-06-10/11, autonomous run while user away)
 - **15 commits ahead of origin/main, NOT pushed.** Awaiting user green light.
 - NOT done (needs user / external): real PyPI publish (account locked), deploy to

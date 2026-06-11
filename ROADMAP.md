@@ -27,6 +27,10 @@ runnable HTTP API. Published on TestPyPI. **198 tests passing, 94% coverage.**
 - Locale-aware amount normalization — European `1.234,50` and US `1,234.50`
 - 198 tests, 94% coverage
 
+**Shipped in V4.3:**
+- `dih-engine config` — credential management without hand-editing `.env`: list (masked values + set/rotation dates + provider), set (hidden prompt), unset. Atomic writes, typo/injection protection, secrets never echoed. Logic in `config_store.py` so a future local UI mounts on the same module.
+- 219 tests, 94% coverage
+
 ---
 
 ## Tier 1 — Hardened CLI Tool

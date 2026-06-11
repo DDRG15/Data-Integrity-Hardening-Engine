@@ -5,6 +5,28 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [4.3.0] — 2026-06-11
+
+### Added
+- **`dih-engine config` subcommand** (`config_store.py` + CLI wiring): manage `.env`
+  credentials without hand-editing — `config list` (status, masked value, set/rotation
+  dates, provider), `config set NAME` (hidden `getpass` prompt for secrets), `config unset
+  NAME` (expired/rotated-out keys). Metadata lives in `.env.meta.json` (git+docker
+  ignored): set date, rotation date, optional provider label, last-4 of secret values.
+- Security contract, tested not promised: values never printed/logged/echoed; metadata
+  asserted secret-free via `json.dumps`; unknown variable names rejected (typo protection);
+  multiline values rejected (injection protection); atomic `.env` writes
+  (tempfile + `os.replace`); comments and foreign lines preserved byte-for-byte;
+  secrets under 8 chars fully masked; unknown vars found in `.env` reported but masked.
+- Logic isolated in `config_store.py` — a future local UI mounts on the same module
+  without touching the CLI.
+
+### Tests
+- **219 tests, 0 warnings** (was 198). `test_config.py` (21 tests, new file): set/rotate/
+  unset lifecycle, comment preservation, secret masking, CLI round-trip, exit codes.
+
+---
+
 ## [4.2.0] — 2026-06-10
 
 ### Added
@@ -215,7 +237,8 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 | 4.0.0 | 124 | 83% |
 | 4.1.0 | 162 | 93% |
 | 4.1.1 | 162 | 93% |
-| 4.2.0 | **198** | **94%** |
+| 4.2.0 | 198 | 94% |
+| 4.3.0 | **219** | **94%** |
 
 ## Remaining coverage gaps (as of 4.1.1)
 
