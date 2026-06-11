@@ -42,6 +42,14 @@ logger = logging.getLogger(__name__)
 
 USER_AGENTS = requests_probe.USER_AGENTS
 
+# delay_retry exponential backoff: 5s -> 10s -> 20s (+0-1s jitter), capped at 60s.
+# Jitter desynchronizes the 10 parallel workers so retries don't hit a rate-limited
+# site in a synchronized burst, which would re-trigger the 429.
+BACKOFF_BASE = 5.0
+BACKOFF_MULTIPLIER = 2.0
+BACKOFF_CAP = 60.0
+BACKOFF_MAX_RETRIES = 3
+
 
 @dataclass
 class ProbeResult:
@@ -175,15 +183,24 @@ def analyze_tech_stack(
             result.error_detail += f" | playwright: {fb.error_detail}"
 
         elif module_name == "delay_retry":
-            delay = random.uniform(5, 12)
-            logger.info("delay_retry url=%s delay=%.1fs", url, delay)
-            _sleep_fn(delay)
-            retry_fetch = requests_probe.probe(url, timeout=timeout, session=session, _sleep_fn=lambda _: None)
-            retry = _build_probe_result(url, retry_fetch)
-            if retry.status == "ok":
-                logger.info("delay_retry_success url=%s", url)
-                return retry
-            result.error_detail += f" | retry: {retry.error_detail}"
+            for attempt in range(BACKOFF_MAX_RETRIES):
+                delay = min(BACKOFF_BASE * (BACKOFF_MULTIPLIER ** attempt), BACKOFF_CAP)
+                delay += random.uniform(0, 1)
+                logger.info(
+                    "delay_retry url=%s attempt=%d/%d delay=%.1fs",
+                    url, attempt + 1, BACKOFF_MAX_RETRIES, delay,
+                )
+                _sleep_fn(delay)
+                retry_fetch = requests_probe.probe(url, timeout=timeout, session=session, _sleep_fn=lambda _: None)
+                retry = _build_probe_result(url, retry_fetch)
+                if retry.status == "ok":
+                    logger.info("delay_retry_success url=%s attempt=%d", url, attempt + 1)
+                    return retry
+                result.error_detail += f" | retry {attempt + 1}: {retry.error_detail}"
+                if retry.status not in ("http_429", "timeout"):
+                    # Error class changed (e.g. 429 -> 403): more waiting won't help.
+                    logger.info("delay_retry_abort url=%s status=%s", url, retry.status)
+                    break
 
     logger.info("probe_result url=%s status=%s tech=%r", url, result.status, result.tech)
     return result

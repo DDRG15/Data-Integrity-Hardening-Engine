@@ -664,3 +664,67 @@ class TestCleanAndOptimizeMap:
 
         with pytest.raises(ValueError, match="CSV 'URL' column contains no valid URLs"):
             clean_and_optimize_map(str(input_csv), str(output_csv), request_timeout=10, sample_size=1)
+
+
+class TestExponentialBackoff:
+    """delay_retry backoff: base 5s, multiplier 2x, cap 60s, 0-1s jitter, max 3 retries."""
+
+    _RATE_LIMITED = {"status": "http_429", "html": "", "content_type": "", "error_detail": "Rate Limited"}
+    _TIMED_OUT = {"status": "timeout", "html": "", "content_type": "", "error_detail": "timeout after 10s"}
+    _FORBIDDEN = {"status": "http_403", "html": "", "content_type": "", "error_detail": "HTTP 403"}
+    _OK = {
+        "status": "ok",
+        "html": "<html><body>Recovered after backoff</body></html>",
+        "content_type": "text/html",
+        "error_detail": "",
+    }
+
+    def test_delays_follow_exponential_sequence(self):
+        slept = []
+        with patch("src.dih_engine.recon.seer.requests_probe.probe", return_value=self._RATE_LIMITED):
+            result = analyze_tech_stack("http://example.com", session=None, _sleep_fn=slept.append)
+
+        assert len(slept) == 3
+        assert 5.0 <= slept[0] <= 6.0    # base 5 + jitter [0, 1)
+        assert 10.0 <= slept[1] <= 11.0  # 5 * 2^1 + jitter
+        assert 20.0 <= slept[2] <= 21.0  # 5 * 2^2 + jitter
+        assert result.status == "http_429"
+        assert "retry 1" in result.error_detail
+        assert "retry 3" in result.error_detail
+
+    def test_delay_is_capped_at_60_seconds(self, monkeypatch):
+        monkeypatch.setattr("src.dih_engine.recon.seer.BACKOFF_BASE", 40.0)
+        slept = []
+        with patch("src.dih_engine.recon.seer.requests_probe.probe", return_value=self._RATE_LIMITED):
+            analyze_tech_stack("http://example.com", session=None, _sleep_fn=slept.append)
+
+        assert len(slept) == 3
+        assert 40.0 <= slept[0] <= 41.0  # base 40, under cap
+        assert 60.0 <= slept[1] <= 61.0  # 80 capped to 60 + jitter
+        assert 60.0 <= slept[2] <= 61.0  # 160 capped to 60 + jitter
+
+    def test_success_on_second_retry_stops_backing_off(self):
+        slept = []
+        with patch(
+            "src.dih_engine.recon.seer.requests_probe.probe",
+            side_effect=[self._RATE_LIMITED, self._RATE_LIMITED, self._OK],
+        ):
+            result = analyze_tech_stack("http://example.com", session=None, _sleep_fn=slept.append)
+
+        assert result.status == "ok"
+        assert len(slept) == 2  # no third sleep after recovery
+
+    def test_error_class_change_aborts_remaining_retries(self):
+        # 429 -> 403 on first retry: site went from rate-limiting to blocking.
+        # More waiting cannot help; remaining retries must be skipped.
+        slept = []
+        with patch(
+            "src.dih_engine.recon.seer.requests_probe.probe",
+            side_effect=[self._TIMED_OUT, self._FORBIDDEN],
+        ):
+            result = analyze_tech_stack("http://example.com", session=None, _sleep_fn=slept.append)
+
+        assert len(slept) == 1
+        assert result.status == "timeout"
+        assert result.fallback_module == "delay_retry"
+        assert "HTTP 403" in result.error_detail
