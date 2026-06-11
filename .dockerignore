@@ -20,6 +20,7 @@ htmlcov/
 
 # Never bake secrets into the image
 .env
+.env.meta.json
 
 # Private documentation -- must never reach a registry image
 PRIVATE_README.md
