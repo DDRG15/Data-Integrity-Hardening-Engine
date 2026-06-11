@@ -68,6 +68,12 @@ Full `git log` scan for Co-Authored-By / Claude / Anthropic: **clean, zero trace
 - Run server: `uvicorn "dih_engine.api:create_app" --factory`
 - 11 new tests (test_api.py). **188 tests, 0 warnings.**
 
+### Phase 3b — POST /extract (commit `7f6a4ab`)
+- Tempfile bridge to `bulletproof_processor`: API inherits disk abort, memory
+  pause and audit counts from the CLI engine -- zero reimplementation.
+- Disk abort -> 507 (never a silent 200 with empty records). 5 MB sync cap.
+- 5 new tests. **193 tests, 0 warnings.**
+
 ### Next phases (planned order)
 - Tier 1 backlog (added 2026-06-10): `--retry` second-pass flag (re-probe only non-ok
   rows of a previous output CSV — deferred re-run instead of in-process standby);
