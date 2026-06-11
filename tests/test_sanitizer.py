@@ -64,3 +64,44 @@ class TestExtractData:
         result = engine.extract_data("01234 ITEM 14,50")
         assert result is not None
         assert result["amount"] == "14.50"
+
+
+class TestAmountLocaleNormalization:
+    """Grouped thousand-separator amounts: European and US conventions.
+
+    Before this feature the amount pattern silently rejected grouped amounts:
+    the record fell to PARTIAL with amount=None — silent data loss, not a
+    visible error. The 2-decimal tail contract resolves locale ambiguity
+    without detection: rightmost separator = decimal mark, always.
+    """
+
+    def test_european_format_dot_thousands_comma_decimal(self, engine):
+        result = engine.extract_data("01234 INDUSTRIAL PRESS 1.234,50")
+        assert result["status"] == "APPROVED"
+        assert result["amount"] == "1234.50"
+
+    def test_us_format_comma_thousands_dot_decimal(self, engine):
+        result = engine.extract_data("01234 INDUSTRIAL PRESS 1,234.50")
+        assert result["status"] == "APPROVED"
+        assert result["amount"] == "1234.50"
+
+    def test_european_multigroup_millions(self, engine):
+        result = engine.extract_data("01234 WAREHOUSE LOT 1.234.567,89")
+        assert result["amount"] == "1234567.89"
+
+    def test_us_multigroup_millions(self, engine):
+        result = engine.extract_data("01234 WAREHOUSE LOT 1,234,567.89")
+        assert result["amount"] == "1234567.89"
+
+    def test_plain_decimals_unchanged_regression(self, engine):
+        # The two pre-existing shapes must keep working exactly as before.
+        assert engine.extract_data("01234 ITEM 14,50")["amount"] == "14.50"
+        assert engine.extract_data("01234 ITEM 14.50")["amount"] == "14.50"
+        assert engine.extract_data("01234 ITEM 12345,99")["amount"] == "12345.99"
+
+    def test_date_like_token_still_not_captured(self, engine):
+        # 12.06.26 has 2-digit groups -- fails both pattern alternatives.
+        # Must stay PARTIAL (id only), never misread a date as an amount.
+        result = engine.extract_data("01234 BATCH 12.06.26")
+        assert result["status"] == "PARTIAL"
+        assert result["amount"] is None

@@ -27,9 +27,15 @@ class DataSanitizer:
         # Tolerates O↔0 confusion common in OCR-scanned product/transaction IDs.
         self._id_pattern = re.compile(r"^([0-9O]{4,14})\s+")
 
-        # Finds isolated monetary amounts at the end of a line.
+        # Finds isolated monetary amounts at the end of a line. Two shapes:
+        #   grouped: 1.234,50 / 1,234.50 / 1.234.567,89  (thousand separators)
+        #   plain:   14,50 / 14.50 / 12345.99
         # Negative lookbehind (?<!\S) requires the amount be preceded by whitespace.
-        self._amount_pattern = re.compile(r"(?<!\S)(\d{1,5}[.,]\d{2})\s*[A-Za-z]?\s*$")
+        # The mandatory 2-decimal tail is the contract that makes normalization
+        # unambiguous: the rightmost separator is always the decimal mark.
+        self._amount_pattern = re.compile(
+            r"(?<!\S)(\d{1,3}(?:[.,]\d{3})+[.,]\d{2}|\d{1,5}[.,]\d{2})\s*[A-Za-z]?\s*$"
+        )
 
         self._blacklist: list[str] = [
             "TOTAL", "SUBTOTAL", "TAX", "CASH", "CARD",
@@ -58,12 +64,19 @@ class DataSanitizer:
 
     def _normalize_amount(self, raw: str) -> str:
         """
-        Normalizes a captured amount string to a dot-decimal format.
-        Handles both comma-decimal ('14,50') and period-decimal ('14.50').
-        Does NOT handle European thousand separators like '1.234,50' — that
-        requires domain-specific disambiguation and is a documented limitation.
+        Normalizes a captured amount string to dot-decimal format.
+
+        Handles plain decimals ('14,50' / '14.50') and grouped formats in both
+        conventions: European '1.234,50' and US '1,234.50' -> '1234.50'.
+        No locale detection needed: the amount pattern guarantees the string
+        ends in <separator><2 digits>, so the rightmost separator is always
+        the decimal mark and every separator before it is a thousands mark.
         """
-        return raw.replace(",", ".")
+        last_sep = max(raw.rfind("."), raw.rfind(","))
+        if last_sep == -1:
+            return raw
+        integer_part = raw[:last_sep].replace(".", "").replace(",", "")
+        return f"{integer_part}.{raw[last_sep + 1:]}"
 
     def extract_data(self, line: str) -> Optional[dict]:
         """
