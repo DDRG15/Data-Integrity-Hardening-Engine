@@ -21,7 +21,8 @@ dependencies = [
 tls     = ["curl-cffi>=0.6"]
 browser = ["playwright>=1.40"]
 proxy   = ["requests[socks]"]
-full    = ["curl-cffi>=0.6", "playwright>=1.40", "requests[socks]"]
+api     = ["fastapi>=0.110", "uvicorn[standard]>=0.29"]
+full    = ["curl-cffi>=0.6", "playwright>=1.40", "requests[socks]", "fastapi>=0.110", "uvicorn[standard]>=0.29"]
 
 [project.scripts]
 dih-engine = "dih_engine.cli:main"
@@ -30,6 +31,12 @@ dih-engine = "dih_engine.cli:main"
 testpaths = ["tests"]
 pythonpath = ["."]
 addopts = "--cov=src/dih_engine --cov-report=term-missing -v"
+filterwarnings = [
+    # Third-party: starlette/formparsers.py imports the legacy `multipart` shim.
+    # Not our code and not our codepath -- the API is JSON-only, no form parsing.
+    # Remove this filter when starlette drops the legacy import.
+    "ignore:Please use `import python_multipart` instead.:PendingDeprecationWarning",
+]
 
 [tool.setuptools.packages.find]
 where = ["src"]
