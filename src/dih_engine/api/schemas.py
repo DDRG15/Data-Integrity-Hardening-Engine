@@ -57,6 +57,18 @@ class ExtractResponse(BaseModel):
     audit: ExtractAudit
 
 
+class JobSubmitResponse(BaseModel):
+    job_id: str
+    status: Literal["queued"]
+
+
+class JobStatusResponse(BaseModel):
+    job_id: str
+    status: Literal["queued", "running", "done", "failed"]
+    result: Optional[ExtractResponse] = None
+    error: Optional[str] = None
+
+
 class HealthResponse(BaseModel):
     status: Literal["ok"]
     version: str

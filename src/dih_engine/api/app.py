@@ -11,6 +11,7 @@ import json
 import logging
 import os
 import tempfile
+from concurrent.futures import ThreadPoolExecutor
 from importlib.metadata import PackageNotFoundError, version
 
 from fastapi import Depends, FastAPI, HTTPException
@@ -18,13 +19,53 @@ from fastapi import Depends, FastAPI, HTTPException
 from ..extraction.engine import bulletproof_processor
 from ..sanitizer.core import DataSanitizer
 from .auth import require_api_key
+from .jobs import JobStore
 from .schemas import (
     ExtractRequest,
     ExtractResponse,
     HealthResponse,
+    JobStatusResponse,
+    JobSubmitResponse,
     SanitizeRequest,
     SanitizeResponse,
 )
+
+
+class DiskAbortError(RuntimeError):
+    """Extraction refused to start: server disk above threshold."""
+
+
+def _run_extraction(text: str) -> dict:
+    """
+    Bridges an HTTP payload to the file engine via tempfiles, so the API
+    inherits every CLI guardrail (disk abort, memory pause, audit counts).
+    Shared by the sync endpoint and the async job worker.
+    """
+    with tempfile.TemporaryDirectory(prefix="dih_api_") as tmp:
+        in_path = os.path.join(tmp, "input.txt")
+        out_path = os.path.join(tmp, "output.jsonl")
+        with open(in_path, "w", encoding="utf-8") as f:
+            f.write(text)
+
+        audit = bulletproof_processor(in_path, out_path, output_format="jsonl")
+
+        if audit.get("aborted"):
+            raise DiskAbortError("extraction aborted: server disk usage above threshold")
+
+        records: list[dict] = []
+        with open(out_path, "r", encoding="utf-8") as f:
+            for line in f:
+                if line.strip():
+                    records.append(json.loads(line))
+
+    return {
+        "records": records,
+        "audit": {
+            "total": audit["total"],
+            "matched": audit["matched"],
+            "skipped": audit["skipped"],
+        },
+    }
 
 logger = logging.getLogger(__name__)
 
@@ -72,41 +113,51 @@ def create_app() -> FastAPI:
         dependencies=[Depends(require_api_key)],
     )
     def extract(req: ExtractRequest) -> dict:
-        # The battle-tested file engine does the work -- tempfiles bridge the
-        # HTTP payload to it, so the API inherits every guardrail (disk abort,
-        # memory pause, audit counts) instead of reimplementing them.
-        with tempfile.TemporaryDirectory(prefix="dih_api_") as tmp:
-            in_path = os.path.join(tmp, "input.txt")
-            out_path = os.path.join(tmp, "output.jsonl")
-            with open(in_path, "w", encoding="utf-8") as f:
-                f.write(req.text)
-
-            audit = bulletproof_processor(in_path, out_path, output_format="jsonl")
-
-            if audit.get("aborted"):
-                logger.error("extract_aborted disk_threshold_exceeded")
-                raise HTTPException(
-                    status_code=507,
-                    detail="extraction aborted: server disk usage above threshold",
-                )
-
-            records: list[dict] = []
-            with open(out_path, "r", encoding="utf-8") as f:
-                for line in f:
-                    if line.strip():
-                        records.append(json.loads(line))
-
+        try:
+            payload = _run_extraction(req.text)
+        except DiskAbortError as exc:
+            logger.error("extract_aborted disk_threshold_exceeded")
+            raise HTTPException(status_code=507, detail=str(exc))
         logger.info(
             "extract_ok total=%d matched=%d skipped=%d",
-            audit["total"], audit["matched"], audit["skipped"],
+            payload["audit"]["total"], payload["audit"]["matched"], payload["audit"]["skipped"],
         )
-        return {
-            "records": records,
-            "audit": {
-                "total": audit["total"],
-                "matched": audit["matched"],
-                "skipped": audit["skipped"],
-            },
-        }
+        return payload
+
+    # Async jobs: 2 workers is deliberate -- extraction is CPU+disk bound, and
+    # an API instance that saturates itself with background jobs stops
+    # answering /health, which gets it restarted mid-job by the orchestrator.
+    job_store = JobStore()
+    job_pool = ThreadPoolExecutor(max_workers=2, thread_name_prefix="dih-job")
+
+    def _execute_job(job_id: str, text: str) -> None:
+        job_store.mark_running(job_id)
+        try:
+            payload = _run_extraction(text)
+            job_store.mark_done(job_id, payload)
+        except Exception as exc:  # noqa: BLE001 -- a job must never kill its worker thread
+            job_store.mark_failed(job_id, str(exc))
+
+    @app.post(
+        "/extract/async",
+        response_model=JobSubmitResponse,
+        status_code=202,
+        dependencies=[Depends(require_api_key)],
+    )
+    def extract_async(req: ExtractRequest) -> dict:
+        job = job_store.create()
+        job_pool.submit(_execute_job, job.id, req.text)
+        return {"job_id": job.id, "status": "queued"}
+
+    @app.get(
+        "/jobs/{job_id}",
+        response_model=JobStatusResponse,
+        dependencies=[Depends(require_api_key)],
+    )
+    def job_status(job_id: str) -> dict:
+        job = job_store.get(job_id)
+        if job is None:
+            raise HTTPException(status_code=404, detail="unknown job id")
+        return {"job_id": job.id, "status": job.status, "result": job.result, "error": job.error}
 
     return app
