@@ -1,4 +1,7 @@
 .git/
+.gitignore
+.gitattributes
+.dockerignore
 .github/
 .venv/
 venv/
@@ -13,16 +16,33 @@ build/
 .coverage
 coverage.xml
 htmlcov/
+.claude/
 
 # Never bake secrets into the image
 .env
 
-# Output data — mounted at runtime via volume
+# Private documentation -- must never reach a registry image
+PRIVATE_README.md
+PITCH.md
+
+# Internal session notes (gitignored)
+NEXT_SESSION.md
+conversation
+
+# Output data -- mounted at runtime via volume, never baked in
 *.jsonl
 *.db
 *.csv
+data/
 
-# Docs and dev-only files
+# Docs and dev-only files (README.md is intentionally kept -- the build COPYs it)
 docs/
 tests/
 ROADMAP.md
+CHANGELOG.md
+
+# Docker build files themselves don't belong inside the image
+Dockerfile
+Dockerfile.api
+docker-compose.yml
+.env.example
