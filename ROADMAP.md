@@ -28,7 +28,7 @@ Published on TestPyPI. **162 tests passing, 93% coverage.**
 - [x] Publish `dih-engine` to TestPyPI — verified installable
 - [x] Test coverage 80%+ — achieved **93%**, 162 tests
 - [ ] Publish to real PyPI — requires `PYPI_API_TOKEN` secret added in GitHub repo settings
-- [ ] **Exponential backoff in `delay_retry`** — replace fixed 5-12s random sleep with base 5s, multiplier 2x, cap 60s; sites that 429 deserve a real backoff strategy
+- [x] **Exponential backoff in `delay_retry`** — done 2026-06-10: base 5s, multiplier 2x, cap 60s, 0-1s jitter, abort on error class change
 - [ ] FlareSolverr end-to-end validation against real Cloudflare-protected sites in CI
 - [ ] Playwright end-to-end validation for `js_required` detection on real CSR pages
 - [ ] Locale-aware amount normalization — handle European format `1.234,50`

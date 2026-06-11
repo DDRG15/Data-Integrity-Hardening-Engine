@@ -5,6 +5,41 @@ Each session entry is self-contained — no need to read earlier entries to unde
 
 ---
 
+## Session 2026-06-10 (Wednesday) — Tier 1 Closeout begins
+
+**Status when session started:** V4.1.1 pushed, CI green. 17-day gap (user studying).
+PyPI publication blocked: user locked out of PyPI account, password reset email pending.
+Not a blocker for any code work.
+
+**Working protocol for this session (token-budget safety):** small atomic phases.
+Each phase = code + tests green + local commit + PROGRESS_LOG entry. Heavy docs
+(README/CHANGELOG/ROADMAP/version) updated at milestone close, not per phase.
+If tokens run out mid-phase, max loss = minutes of work, never context.
+**NO PUSH this session** until file audit against remote is done (user request).
+
+### Phase 0 — ROADMAP.md restore
+ROADMAP.md had 5 lines accidentally deleted in the working tree (IDE mishap).
+Restored via `git restore` — committed version was correct. No commit needed.
+
+### Co-author audit
+Full `git log` scan for Co-Authored-By / Claude / Anthropic: **clean, zero traces.**
+
+### Phase 1 — Exponential backoff in delay_retry (commit `510f69d`)
+- `seer.py`: BACKOFF_BASE=5.0, BACKOFF_MULTIPLIER=2.0, BACKOFF_CAP=60.0, BACKOFF_MAX_RETRIES=3
+- Sequence 5s -> 10s -> 20s + 0-1s jitter (desyncs the 10 parallel workers)
+- Abort on error class change (429 -> 403 means WAF block; waiting cannot help)
+- 4 new tests (`TestExponentialBackoff`). **166 tests, 93% coverage, 0 warnings.**
+- ROADMAP Tier 1 checkbox flipped to done.
+
+### Next phases (planned order)
+- Phase 2: locale-aware amount normalization (`1.234,50` European format) in sanitizer
+- Phase 3a-3e: FastAPI scaffold (Tier 2): app + /sanitize -> /extract -> job store +
+  /jobs/{id} -> API key auth -> Docker + docs
+- Milestone close: version 4.2.0 + CHANGELOG/README/ROADMAP/PRIVATE_README/PITCH refresh
+- Pending user: PyPI password reset -> GitHub secrets -> publish. File audit before any push.
+
+---
+
 ## Session 2026-05-24 (Saturday) — CI Fix (V4.1.1)
 
 **Status when session started:** V4.1.0 pushed to GitHub. All 3 CI matrix jobs failed immediately
