@@ -49,8 +49,15 @@ Full `git log` scan for Co-Authored-By / Claude / Anthropic: **clean, zero trace
 - 5 new tests (TestHostCircuitBreaker incl. end-to-end serial-executor skip).
   **171 tests, 93% coverage, 0 warnings.**
 
+### Phase 2 — Locale-aware amount normalization (commit `3f73a78`)
+- Old pattern silently rejected grouped amounts (`1.234,50` fell to PARTIAL with
+  amount=None — silent data loss). New pattern accepts EU + US grouped shapes.
+- No locale detection: the 2-decimal tail contract makes the rightmost separator
+  the decimal mark, always. Normalization is pure position.
+- 6 new tests (TestAmountLocaleNormalization incl. date-like 12.06.26 exclusion).
+  **177 tests, 93% coverage, 0 warnings. All Tier 1 code items now closed.**
+
 ### Next phases (planned order)
-- Phase 2: locale-aware amount normalization (`1.234,50` European format) in sanitizer
 - Tier 1 backlog (added 2026-06-10): `--retry` second-pass flag (re-probe only non-ok
   rows of a previous output CSV — deferred re-run instead of in-process standby);
   `@pytest.mark.live` smoke tests against httpbin.org (excluded from CI, run manually)

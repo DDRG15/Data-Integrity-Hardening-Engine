@@ -31,7 +31,7 @@ Published on TestPyPI. **162 tests passing, 93% coverage.**
 - [x] **Exponential backoff in `delay_retry`** — done 2026-06-10: base 5s, multiplier 2x, cap 60s, 0-1s jitter, abort on error class change
 - [ ] FlareSolverr end-to-end validation against real Cloudflare-protected sites in CI
 - [ ] Playwright end-to-end validation for `js_required` detection on real CSR pages
-- [ ] Locale-aware amount normalization — handle European format `1.234,50`
+- [x] Locale-aware amount normalization — done 2026-06-10: `1.234,50` (EU) and `1,234.50` (US) via rightmost-separator rule, no locale detection needed
 
 ---
 
