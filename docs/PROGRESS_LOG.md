@@ -74,6 +74,17 @@ Full `git log` scan for Co-Authored-By / Claude / Anthropic: **clean, zero trace
 - Disk abort -> 507 (never a silent 200 with empty records). 5 MB sync cap.
 - 5 new tests. **193 tests, 0 warnings.**
 
+### Phase 3c — Async jobs (commit `101cb29`) — SESSION PAUSED HERE (user token limit)
+- POST /extract/async (202 + job_id) + GET /jobs/{id}. In-memory JobStore,
+  2 workers, evicts finished >100, never evicts in-flight. Redis = Tier 3
+  trigger (second instance behind LB), documented in jobs.py.
+- API suite 21/21 green. Full suite NOT re-run before pause (api tests green,
+  no non-api files touched in 3c -- expected 198 total).
+- **RESUME POINT:** (1) run full suite to confirm 198; (2) milestone close:
+  version 4.2.0 + CHANGELOG + README + ROADMAP + PRIVATE_README + PITCH;
+  (3) remaining Tier 2: Dockerfile/compose entry for API + deploy to
+  Railway/Render (needs user account); (4) push pending user green light.
+
 ### Next phases (planned order)
 - Tier 1 backlog (added 2026-06-10): `--retry` second-pass flag (re-probe only non-ok
   rows of a previous output CSV — deferred re-run instead of in-process standby);
