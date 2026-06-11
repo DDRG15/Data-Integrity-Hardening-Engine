@@ -92,11 +92,20 @@ Full `git log` scan for Co-Authored-By / Claude / Anthropic: **clean, zero trace
 - PRIVATE_README.md and PITCH.md refreshed to 4.2.0 (gitignored, not committed).
 - Working tree clean. Private files confirmed ignored via git check-ignore.
 
-### Session state (2026-06-10, autonomous run while user away)
-- **10 commits ahead of origin/main, NOT pushed.** Awaiting user green light.
+### Docker verified (2026-06-11, commit `bdee81c`)
+- Docker Desktop update to 4.77.0 had hung LxssManager (WSL service) -- fixed by a
+  full Windows restart, not antivirus. Then built and ran the API image for real.
+- `.dockerignore` hardened: PRIVATE_README.md, PITCH.md, .claude/, data/, session
+  notes, and Docker/compose files now excluded. README.md kept (build COPYs it).
+- End-to-end against running container `dih-api:4.2.0`: build OK, healthcheck
+  healthy, /health 200, /sanitize 401-without-key + APPROVED-with-EU-amount,
+  /extract audit 3/2/1, async job queued->done. The one "not verified" item from
+  the milestone is now verified. Test container removed.
+
+### Session state (2026-06-10/11, autonomous run while user away)
+- **15 commits ahead of origin/main, NOT pushed.** Awaiting user green light.
 - NOT done (needs user / external): real PyPI publish (account locked), deploy to
-  Railway/Render (needs hosting account), Dockerfile.api build verification (no
-  docker run in this env -- image defined but not built/run here).
+  Railway/Render (needs hosting account).
 - **RESUME POINT next session:** decide push; then deploy path or Tier 3 (Redis
   job store, aiohttp async, --retry flag, live smoke tests).
 
