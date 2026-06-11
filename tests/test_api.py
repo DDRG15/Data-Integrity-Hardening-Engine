@@ -96,3 +96,47 @@ class TestSanitizeEndpoint:
     def test_missing_line_field_rejected_422(self, client):
         resp = client.post("/sanitize", json={}, headers=AUTH)
         assert resp.status_code == 422
+
+
+class TestExtractEndpoint:
+    _VALID_TEXT = (
+        "ID: ABC-001 PRODUCT: Industrial Press PRICE: S/ 1499.90 Stock 4\n"
+        "garbage line that matches nothing\n"
+        "ID: XYZ-002 PRODUCT: Hydraulic Pump PRICE: S/ 850.00 Stock 12\n"
+    )
+
+    def test_requires_api_key(self, client):
+        resp = client.post("/extract", json={"text": self._VALID_TEXT})
+        assert resp.status_code == 401
+
+    def test_happy_path_records_and_audit(self, client):
+        resp = client.post("/extract", json={"text": self._VALID_TEXT}, headers=AUTH)
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["audit"] == {"total": 3, "matched": 2, "skipped": 1}
+        assert len(body["records"]) == 2
+        assert body["records"][0]["ID"] == "ABC-001"
+        assert body["records"][0]["Name"] == "Industrial Press"
+        assert body["records"][1]["ID"] == "XYZ-002"
+
+    def test_all_noise_returns_empty_records(self, client):
+        resp = client.post("/extract", json={"text": "nothing\nuseful\nhere\n"}, headers=AUTH)
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["records"] == []
+        assert body["audit"]["matched"] == 0
+        assert body["audit"]["total"] == 3
+
+    def test_empty_text_rejected_422(self, client):
+        resp = client.post("/extract", json={"text": ""}, headers=AUTH)
+        assert resp.status_code == 422
+
+    def test_disk_abort_returns_507(self, client, monkeypatch):
+        # Server disk above threshold: the engine refuses to start and the API
+        # must surface that as 507, never a 200 with silently empty records.
+        monkeypatch.setattr(
+            "src.dih_engine.api.app.bulletproof_processor",
+            lambda *a, **k: {"total": 0, "matched": 0, "skipped": 0, "aborted": True},
+        )
+        resp = client.post("/extract", json={"text": self._VALID_TEXT}, headers=AUTH)
+        assert resp.status_code == 507

@@ -30,6 +30,33 @@ class SanitizeResponse(BaseModel):
     status: Literal["APPROVED", "PARTIAL", "REJECTED", "NOISE"]
 
 
+# Sync /extract cap: ~5 MB of text. Bigger payloads belong to the async jobs
+# endpoint -- a sync request that takes minutes is a client timeout, not a
+# feature.
+MAX_EXTRACT_TEXT_LENGTH = 5_000_000
+
+
+class ExtractRequest(BaseModel):
+    text: str = Field(
+        ...,
+        min_length=1,
+        max_length=MAX_EXTRACT_TEXT_LENGTH,
+        description="Raw OCR text -- the full file content, newline-separated lines",
+        examples=["ID: ABC-001 PRODUCT: Industrial Press PRICE: S/ 1499.90 Stock 4"],
+    )
+
+
+class ExtractAudit(BaseModel):
+    total: int
+    matched: int
+    skipped: int
+
+
+class ExtractResponse(BaseModel):
+    records: list[dict]
+    audit: ExtractAudit
+
+
 class HealthResponse(BaseModel):
     status: Literal["ok"]
     version: str
