@@ -116,6 +116,10 @@ def _run_config(args) -> None:
     elif args.config_command == "set":
         value = args.value
         if value is None:
+            # Secrets use getpass: the value never appears on screen, in the
+            # terminal scrollback, or in shell history. --value exists for
+            # scripting, but its help text warns it lands in history -- the
+            # hidden prompt is the recommended path for anything secret.
             spec = config_store.KNOWN_VARS.get(args.name)
             if spec and spec["secret"]:
                 import getpass

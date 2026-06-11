@@ -141,7 +141,17 @@ def locate_gold_mines(html: str) -> list[str]:
 
 
 def _identify_stack(html: str, content_type: str) -> tuple[str, str]:
-    """Maps HTML fingerprints to a (tech_stack, extraction_strategy) tuple."""
+    """
+    Maps HTML fingerprints to a (tech_stack, extraction_strategy) tuple.
+
+    Check ORDER is load-bearing -- do not alphabetize:
+      1. content_type first: a JSON API can contain any string in its body,
+         so header evidence beats body heuristics.
+      2. Next.js BEFORE React: every Next.js page also carries React markers;
+         checking React first would misclassify all Next.js sites as CSR and
+         route them to a headless browser they do not need.
+      3. Static HTML is the fall-through, never an explicit match.
+    """
     if "application/json" in content_type:
         return "Pure JSON API", "requests -- direct JSON parse"
     if '"props":{"pageProps":' in html or '<script id="__NEXT_DATA__"' in html:
@@ -197,6 +207,13 @@ def analyze_tech_stack(
         logger.info("fallback_triggered url=%s status=%s module=%s", url, result.status, module_name)
 
         if module_name == "curl_cffi":
+            # Three-level escalation: curl_cffi -> FlareSolverr -> proxy.
+            # Each level that is not installed/configured returns
+            # "module_unavailable" instead of raising, so the chain walks
+            # through whatever the operator actually has -- a bare install
+            # degrades to documented failure, never to a crash. Every level's
+            # error is appended to error_detail: the CSV tells the full story
+            # of what was tried, in order, without reading any logs.
             fb_fetch = curlffi_probe.probe(url, timeout=timeout)
             fb = _build_probe_result(url, fb_fetch)
             if fb.status == "ok":
@@ -253,7 +270,16 @@ def analyze_tech_stack(
 
 
 def _majority_stack(results: list[ProbeResult]) -> ProbeResult:
-    """Returns the most commonly detected stack from a list of successful ProbeResults."""
+    """
+    Returns the most commonly detected stack from a list of successful ProbeResults.
+
+    Why a vote at all: one sampled URL can be an outlier (a static error page
+    on a React site, a CDN redirect) and would misclassify the whole list.
+    Why warning and not error when no absolute majority exists: a split vote
+    still has a best candidate, and aborting the run over a tie would throw
+    away every other probe's work -- the operator gets the warning plus the
+    most frequent answer, and decides.
+    """
     stacks = [r.tech for r in results]
     majority = max(set(stacks), key=stacks.count)
     if stacks.count(majority) < len(stacks) / 2:
