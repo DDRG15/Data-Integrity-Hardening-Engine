@@ -50,8 +50,21 @@ Standard string parsing fails against this input because it assumes the data is 
 │  Output: CSV master plan + stdout intelligence report    │
 │                                                          │
 │  Responsibility: HTTP probing, tech stack fingerprinting,│
-│  majority vote over N samples, DOM density heuristics.   │
+│  majority vote over N samples, DOM density heuristics,   │
+│  exponential backoff, per-host circuit breaker.          │
 │  Independent of extraction and sanitizer modules.        │
+└──────────────────────────────────────────────────────────┘
+
+┌──────────────────────────────────────────────────────────┐
+│  dih_engine.api  (optional extra: [api])                 │
+│                                                          │
+│  Input:  HTTP requests (JSON, X-API-Key header)          │
+│  Output: typed JSON responses (Pydantic contracts)       │
+│                                                          │
+│  Responsibility: transport + auth only. Delegates all    │
+│  processing to sanitizer.core and extraction.engine —    │
+│  the API owns zero business logic. In-memory JobStore    │
+│  for async extraction (single-instance by design).       │
 └──────────────────────────────────────────────────────────┘
 ```
 
@@ -70,6 +83,24 @@ A substring match on `TOTAL` rejects `TOTALIZER CHARGER 9.99`, which is a valid 
 
 **Majority vote for tech stack detection**
 Sampling one URL and using that result to classify an entire URL list fails the moment the sampled URL is an outlier (a static error page on a React site, a redirect to a CDN). Sampling N URLs and taking the majority makes the detection robust to exactly that failure mode. N=3 is the default; it is configurable via `SEER_SAMPLE_SIZE`.
+
+**Rightmost separator as decimal mark — no locale detection**
+`1.234,50` (European) and `1,234.50` (US) are ambiguous only if you try to infer a locale. The amount pattern requires a 2-digit decimal tail, which makes the rightmost separator the decimal mark by construction — every separator before it is a thousands mark. Locale detection would add a failure mode (wrong inference corrupts every amount in the file); the positional rule has none. Tokens without the 2-digit tail (dates like `12.06.26`, bare integers) are correctly not captured as amounts.
+
+**Exponential backoff with abort on error-class change**
+A site that returns 429 is asking for time; retrying on a fixed schedule re-triggers the limiter and burns the run's wall clock. Backoff is 5s → 10s → 20s (cap 60s) with 0–1s jitter so the 10 parallel workers do not retry in a synchronized burst. If the error class changes mid-retry (429 → 403), the site escalated from rate-limiting to blocking — waiting longer cannot help, so remaining retries are aborted instead of slept through.
+
+**Per-host circuit breaker, scoped to one run**
+A catalog CSV routinely carries dozens of URLs on one domain. Without a breaker, every URL of a WAF-blocked host pays full price for the same answer: another exhausted fallback chain, more wall clock, a worse IP reputation with that WAF. After 3 terminal failures (`http_403`, `http_401`, `ssl_error`, `connection_error`) from one host, remaining URLs of that host are written `skipped_circuit_open` with zero network calls. A successful probe resets the host's strikes. Transient statuses (429, timeout, js_required) never strike — they have their own recovery paths.
+
+**API owns transport, never business logic**
+The `/extract` endpoint bridges the HTTP payload to `bulletproof_processor` through tempfiles instead of reimplementing extraction. The day the engine gains a guardrail, the API inherits it the same day — there is no second implementation to drift out of sync. A server disk above threshold surfaces as `507 Insufficient Storage`, never a `200` with silently empty records.
+
+**Fail-closed API authentication**
+An operator who forgets to set `DIH_API_KEY` gets a `503` on the first data request — loud, immediate, fixable in minutes. The alternative (running open when no key is configured) is a publicly writable API discovered weeks later. `/health` stays unauthenticated because orchestrator liveness probes cannot carry secrets; a probe that 503s on a missing key restart-loops the container forever. Key comparison uses `secrets.compare_digest` — constant-time, no timing side channel.
+
+**In-memory JobStore with a named replacement trigger**
+The async job store lives in the API process: one instance, one store, zero infrastructure. This is correct until the exact moment a second instance runs behind a load balancer — then `GET /jobs/{id}` returns 404 for jobs created on the other instance. That moment, and not earlier, is the Redis migration trigger (documented in `jobs.py` and the ROADMAP). Eviction never touches queued or running jobs: losing an in-flight job means a client polls a 404 for work the server accepted.
 
 ---
 
