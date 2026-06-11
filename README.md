@@ -7,13 +7,15 @@
 
 OCR-generated text is not clean data — it is a stream of character mutations, phantom tokens, and structural noise. Unstructured receipts, POS exports, and scraped product feeds all arrive with the same problem: `O` where `0` belongs, garbage rows mixed in with real records, and no way to tell how many records were silently dropped.
 
-This engine solves that in three discrete layers:
+This engine solves that in three discrete layers, available as a CLI, a Python library, and an HTTP API:
 
 1. **Extraction** — Deterministic regex pipeline that ingests raw text files, applies pattern matching, corrects OCR character confusions, and emits structured JSONL. Designed for large files: constant memory footprint, real-time disk/memory monitoring, and a full audit log of every record dropped.
 
-2. **Sanitizer** — A composable `DataSanitizer` class for line-level OCR cleaning. Zero-trust input model: every line is assumed corrupt until proven structured. Returns `APPROVED` / `PARTIAL` / `REJECTED` status per record so downstream consumers know exactly what they received.
+2. **Sanitizer** — A composable `DataSanitizer` class for line-level OCR cleaning. Zero-trust input model: every line is assumed corrupt until proven structured. Returns `APPROVED` / `PARTIAL` / `REJECTED` status per record so downstream consumers know exactly what they received. Locale-aware amount normalization handles European (`1.234,50`) and US (`1,234.50`) formats.
 
-3. **Recon (Seer V4)** — HTTP probe that identifies the tech stack of a target URL list (Next.js, React, VTEX, Squarespace, Static HTML, JSON API). Classifies every failure by type and automatically activates the correct fallback module. Sends notifications to Slack and Discord after each run.
+3. **Recon (Seer V4)** — HTTP probe that identifies the tech stack of a target URL list (Next.js, React, VTEX, Squarespace, Static HTML, JSON API). Classifies every failure by type and automatically activates the correct fallback module, with exponential backoff on rate limits and a per-host circuit breaker. Sends notifications to Slack and Discord after each run.
+
+A **Tier 2 API service** (`dih-engine[api]`) exposes the sanitizer and extraction engine over HTTP with fail-closed API-key auth — see the [API Service](#api-service-tier-2) section.
 
 ---
 
@@ -67,7 +69,8 @@ pip install -e .
 # Install optional fallback modules
 pip install "dih-engine[tls]"      # curl_cffi -- WAF bypass
 pip install "dih-engine[browser]"  # playwright -- headless browser for JS-only pages
-pip install "dih-engine[full]"     # both
+pip install "dih-engine[api]"      # fastapi + uvicorn -- HTTP service (Tier 2)
+pip install "dih-engine[full]"     # all of the above
 
 # Extract structured records from a raw OCR text file
 dih-engine extract --input data/raw_ocr_export.txt --output output/records.jsonl
@@ -88,9 +91,49 @@ result = sanitizer.extract_data("O01234 SOME PRODUCT 14.50")
 docker compose run --rm extract extract --input /data/raw.txt --output /data/out.jsonl
 docker compose run --rm recon recon --input /data/urls.csv --output /data/plan.csv
 
+# Run the API service (Tier 2)
+uvicorn "dih_engine.api:create_app" --factory --port 8000
+# or via Docker: DIH_API_KEY=$(python -c "import secrets;print(secrets.token_urlsafe(32))") docker compose up api
+
 # Run the full test suite
 pytest
 ```
+
+---
+
+## API Service (Tier 2)
+
+The engine is also available over HTTP for teams that do not want to manage a Python
+environment. Install with `pip install "dih-engine[api]"` and run:
+
+```bash
+uvicorn "dih_engine.api:create_app" --factory --port 8000
+```
+
+Every data route requires the `X-API-Key` header matching the `DIH_API_KEY` env var.
+The service is **fail-closed**: if `DIH_API_KEY` is unset on the server, every data route
+returns `503` rather than running open.
+
+| Method | Route | Auth | Purpose |
+|--------|-------|------|---------|
+| `GET`  | `/health` | none | Liveness probe — returns `{"status":"ok","version":"..."}` |
+| `POST` | `/sanitize` | `X-API-Key` | One OCR line → one typed record (`APPROVED`/`PARTIAL`/`REJECTED`/`NOISE`) |
+| `POST` | `/extract` | `X-API-Key` | Full OCR text → records + reconciliation audit (`total`/`matched`/`skipped`) |
+| `POST` | `/extract/async` | `X-API-Key` | Submit large text, returns `202` + `job_id` |
+| `GET`  | `/jobs/{id}` | `X-API-Key` | Poll an async job (`queued`/`running`/`done`/`failed`) |
+
+```bash
+# Sanitize one line
+curl -H "X-API-Key: $DIH_API_KEY" -H "Content-Type: application/json" \
+     -d '{"line":"O01234 SOME PRODUCT 1.234,50"}' \
+     http://localhost:8000/sanitize
+# {"id":"001234","amount":"1234.50","status":"APPROVED"}
+```
+
+`/extract` reuses the same `bulletproof_processor` engine as the CLI, so it inherits every
+guardrail: a server disk above threshold returns `507`, never a silent `200` with empty
+records. Large payloads belong on `/extract/async` — a synchronous request that takes
+minutes is a client timeout, not a feature.
 
 ---
 
@@ -179,6 +222,7 @@ Copy `.env.example` to `.env` and set values before running.
 | `SEER_SAMPLE_SIZE` | int | `3` | URLs sampled for tech stack majority vote |
 | `SLACK_WEBHOOK_URL` | string | — | Slack incoming webhook URL |
 | `DISCORD_WEBHOOK_URL` | string | — | Discord webhook URL |
+| `DIH_API_KEY` | string | — | Required by every API data route; unset = `503` (fail-closed) |
 
 > **Logging:** This is a library -- it does not configure logging internally. Call `logging.basicConfig(level=logging.DEBUG)` in your own script before importing.
 
@@ -203,17 +247,23 @@ src/dih_engine/
 │       ├── playwright_probe.py     # Headless browser [dih-engine[browser]]
 │       ├── flaresolverr_probe.py   # Self-hosted Cloudflare solver (no account needed)
 │       └── proxy_probe.py          # HTTP/SOCKS5 or Scrapfly rotation [dih-engine[proxy]]
-└── notifications/
-    ├── slack_notifier.py       # Slack Block Kit report
-    └── discord_notifier.py     # Discord rich embed report
+├── notifications/
+│   ├── slack_notifier.py       # Slack Block Kit report
+│   └── discord_notifier.py     # Discord rich embed report
+└── api/                        # Tier 2 HTTP service [dih-engine[api]]
+    ├── app.py                  # create_app() factory + endpoints
+    ├── auth.py                 # X-API-Key dependency (fail-closed)
+    ├── schemas.py              # Pydantic request/response contracts
+    └── jobs.py                 # In-memory async JobStore
 tests/
 ├── test_extraction.py          # Extraction engine + edge cases
-├── test_sanitizer.py           # DataSanitizer APPROVED/PARTIAL/REJECTED paths
-├── test_seer.py                # Full recon orchestrator + fallback chain
+├── test_sanitizer.py           # DataSanitizer + locale amount normalization
+├── test_seer.py                # Recon orchestrator + backoff + circuit breaker
 ├── test_seer_followups.py      # Thread-pool timeout + FlareSolverr error paths
 ├── test_probe_modules.py       # Direct probe() coverage: requests, curlffi, playwright
 ├── test_cli.py                 # CLI argument parsing + sys.exit codes
-└── test_notifications.py       # Slack + Discord notifiers
+├── test_notifications.py       # Slack + Discord notifiers
+└── test_api.py                 # API auth, /sanitize, /extract, async jobs
 ```
 
 ---
@@ -224,13 +274,15 @@ The engine is production-ready for its current scope. The following are delibera
 
 | Priority | Item | Notes |
 |----------|------|-------|
+| High | **API deployment** | Deploy the Tier 2 service to Railway or Render with usage-based metering |
+| High | **Redis-backed JobStore** | Replace the in-memory job store the moment a second API instance runs behind a load balancer |
 | High | **Native async probing** (`aiohttp`) | Replace `ThreadPoolExecutor` with true async I/O for better resource efficiency at scale |
 | High | **FlareSolverr live validation** | End-to-end test against real Cloudflare-protected sites (stackoverflow.com, etsy.com) once Docker is in CI |
-| Medium | **Locale-aware amount normalization** | Handle European format `1.234,50` via locale detection before OCR correction |
 | Medium | **Playwright live validation** | End-to-end test for `js_required` detection against real CSR-only pages |
 | Low | **Streaming extraction** | Pipeline output as a generator instead of collecting all records in memory |
-| Medium | **Exponential backoff in `delay_retry`** | Replace fixed 5-12s random sleep with base 5s, multiplier 2x, cap 60s — sites that 429 deserve a real backoff |
-| Low | **~~Test coverage > 80%~~** | **Done — 93%, 162 tests** |
+| Low | **~~Test coverage > 80%~~** | **Done — 94%, 198 tests** |
+| Low | **~~Exponential backoff in `delay_retry`~~** | **Done — base 5s, 2x, cap 60s, jitter** |
+| Low | **~~Locale-aware amount normalization~~** | **Done — `1.234,50` and `1,234.50` via rightmost-separator rule** |
 
 ---
 
@@ -247,20 +299,36 @@ Full chain: `curl_cffi` -> `flaresolverr` (start with `docker compose up -d flar
 no client-side module resolves a bad server cert. The site is documented in the output CSV
 and should be removed from the URL list.
 
-**European Thousand Separators**
-Amount normalization handles `14,50` -> `14.50` but not `1.234,50` (period-as-thousands,
-comma-as-decimal). Resolution: locale detection before normalization.
+**Mixed-locale amounts in one file**
+Amount normalization handles `14,50`, `1.234,50` (European) and `1,234.50` (US) by treating
+the rightmost separator as the decimal mark. It does not infer a single locale per file — each
+amount is normalized independently. A token with no 2-digit decimal tail (a bare integer, or a
+date like `12.06.26`) is correctly not captured as an amount.
 
 **Parallel Recon (10 workers)**
 Seer V4 probes up to 10 URLs concurrently via `ThreadPoolExecutor`. At 100 URLs, expect
 ~1 minute. Aggressive WAF sites may 429 more readily under concurrent load -- `delay_retry`
-handles this automatically. Future: `aiohttp` for true async I/O.
+handles this with exponential backoff. A per-host circuit breaker stops probing a domain
+after 3 terminal failures, so a catalog with many URLs on one blocked host does not burn
+the full fallback chain on every row. Future: `aiohttp` for true async I/O.
+
+**API job store is in-memory**
+The async `/extract/async` job store lives in the API process. This is correct for a single
+instance. The moment a second instance runs behind a load balancer, `GET /jobs/{id}` returns
+`404` for jobs created on the other instance. Resolution: back the store with Redis (Tier 3).
 
 ---
 
 ## Changelog
 
-**V4.1.1 (current)**
+**V4.2.0 (current)**
+- Added: Tier 2 API service (`dih-engine[api]`) -- `/health`, `/sanitize`, `/extract`, `/extract/async`, `/jobs/{id}` with fail-closed `X-API-Key` auth
+- Added: exponential backoff in `delay_retry` -- base 5s, 2x, cap 60s, jitter, aborts on error-class change
+- Added: per-host circuit breaker -- skips remaining URLs of a host after 3 terminal failures
+- Added: locale-aware amount normalization -- European `1.234,50` and US `1,234.50`
+- Tests: 198 tests, 94% coverage (was 162 tests, 93%)
+
+**V4.1.1**
 - Fixed: CI green on all Python versions -- `cffi_requests` / `sync_playwright` now assigned `None` in `except ImportError` so `patch()` works when optional deps are absent
 - Fixed: `pythonpath = ["."]` added to pytest config -- `from src.dih_engine` imports reliable in all runner environments
 

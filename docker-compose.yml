@@ -18,6 +18,23 @@ services:
       SEER_REQUEST_TIMEOUT: "10"
       SEER_SAMPLE_SIZE: "3"
 
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile.api
+    # Usage: DIH_API_KEY=your-secret docker compose up api
+    # Then: curl -H "X-API-Key: your-secret" -X POST localhost:8000/sanitize \
+    #            -H "Content-Type: application/json" -d '{"line":"O01234 ITEM 14,50"}'
+    ports:
+      - "8000:8000"
+    environment:
+      # Fail-closed: the service returns 503 on data routes until this is set.
+      # Never commit a real key -- inject it from the shell or a secrets manager.
+      DIH_API_KEY: "${DIH_API_KEY:?set DIH_API_KEY before starting the api service}"
+      DEE_PAUSE_THRESHOLD: "80.0"
+      DEE_DISK_THRESHOLD: "95.0"
+    restart: unless-stopped
+
   flaresolverr:
     image: ghcr.io/flaresolverr/flaresolverr:latest
     # Usage: docker compose up -d flaresolverr

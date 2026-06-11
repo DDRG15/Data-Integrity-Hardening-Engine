@@ -5,6 +5,42 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [4.2.0] — 2026-06-10
+
+### Added
+- **Tier 2 API service** (`dih_engine.api`, optional extra `[api]`): FastAPI app exposing
+  the engine over HTTP. Run with `uvicorn "dih_engine.api:create_app" --factory`.
+  - `GET /health` — unauthenticated liveness probe (probes cannot carry secrets).
+  - `POST /sanitize` — one OCR line in, one typed record out (`APPROVED`/`PARTIAL`/`REJECTED`/`NOISE`).
+  - `POST /extract` — full OCR text in, structured records + reconciliation audit out.
+    Reuses `bulletproof_processor` via tempfiles, inheriting disk/memory guardrails.
+    Disk abort surfaces as `507`, never a silent `200` with empty records.
+  - `POST /extract/async` + `GET /jobs/{id}` — submit large files, poll for completion.
+    In-memory `JobStore` (lock-guarded, 2 workers, evicts finished beyond 100, never
+    evicts in-flight jobs). Async result honors the same audit contract as sync `/extract`.
+  - **Fail-closed auth**: `X-API-Key` header against `DIH_API_KEY`; no server key = `503`
+    on every data route. Constant-time comparison via `secrets.compare_digest`.
+- **Exponential backoff in `delay_retry`** (`seer.py`): base 5s, multiplier 2x, cap 60s,
+  0-1s jitter to desynchronize the 10 parallel workers. Aborts remaining retries when the
+  error class changes mid-retry (429 → 403 means a WAF block; waiting cannot help).
+- **Per-host circuit breaker** (`seer.py`): after 3 terminal failures from one host
+  (`http_403`/`http_401`/`ssl_error`/`connection_error`), remaining URLs of that host are
+  written `skipped_circuit_open` without a network call. Protects API credits and IP
+  reputation on catalogs with many URLs per domain. Success resets the host's strikes.
+- **Locale-aware amount normalization** (`sanitizer/core.py`): handles European `1.234,50`
+  and US `1,234.50` grouped formats. The mandatory 2-decimal tail makes the rightmost
+  separator the decimal mark — no locale detection needed. Previously these amounts were
+  silently dropped to `PARTIAL` with `amount=None`.
+
+### Tests
+- **198 tests, 0 warnings. Coverage: 94% overall** (was 162 tests, 93%).
+- `test_api.py` (21 tests, new file): auth gate (401/503), `/sanitize`, `/extract` with
+  exact audit counts, disk-abort 507, async job lifecycle (queued → done/failed), 404.
+- `test_seer.py` additions: `TestExponentialBackoff` (4), `TestHostCircuitBreaker` (5).
+- `test_sanitizer.py` additions: `TestAmountLocaleNormalization` (6).
+
+---
+
 ## [4.1.1] — 2026-05-24
 
 ### Fixed
@@ -178,7 +214,8 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 | 3.2.0 | ~28 | ~55% |
 | 4.0.0 | 124 | 83% |
 | 4.1.0 | 162 | 93% |
-| 4.1.1 | **162** | **93%** |
+| 4.1.1 | 162 | 93% |
+| 4.2.0 | **198** | **94%** |
 
 ## Remaining coverage gaps (as of 4.1.1)
 

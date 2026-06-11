@@ -1,9 +1,9 @@
 # Roadmap
 
-## Current State — V4.1
+## Current State — V4.2
 
-The engine is production-ready as a local CLI and importable Python library.
-Published on TestPyPI. **162 tests passing, 93% coverage.**
+The engine is production-ready as a local CLI, an importable Python library, and a
+runnable HTTP API. Published on TestPyPI. **198 tests passing, 94% coverage.**
 
 **Shipped in V4.0:**
 - Modular fallback chain: `requests` -> `curl_cffi` -> `FlareSolverr` -> `proxy`
@@ -19,19 +19,28 @@ Published on TestPyPI. **162 tests passing, 93% coverage.**
 - CLI + programmatic input validation — all numeric parameters guarded with descriptive errors
 - URL column pre-filter — strips whitespace, handles `"nan"` strings, raises if all entries blank
 - 162 tests, 93% coverage (was 124 tests, 83%)
-- `requests_probe` 100%, `proxy_probe` 100%, `curlffi_probe` 90%, `playwright_probe` 91%
+
+**Shipped in V4.2:**
+- Tier 2 API service (`dih-engine[api]`): `/health`, `/sanitize`, `/extract`, `/extract/async`, `/jobs/{id}` with fail-closed `X-API-Key` auth
+- Exponential backoff in `delay_retry` — base 5s, 2x, cap 60s, jitter, aborts on error-class change
+- Per-host circuit breaker — skips remaining URLs of a host after 3 terminal failures
+- Locale-aware amount normalization — European `1.234,50` and US `1,234.50`
+- 198 tests, 94% coverage
 
 ---
 
-## Tier 1 — Hardened CLI Tool (current focus)
+## Tier 1 — Hardened CLI Tool
 
 - [x] Publish `dih-engine` to TestPyPI — verified installable
-- [x] Test coverage 80%+ — achieved **93%**, 162 tests
+- [x] Test coverage 80%+ — achieved **94%**, 198 tests
 - [ ] Publish to real PyPI — requires `PYPI_API_TOKEN` secret added in GitHub repo settings
 - [x] **Exponential backoff in `delay_retry`** — done 2026-06-10: base 5s, multiplier 2x, cap 60s, 0-1s jitter, abort on error class change
+- [x] **Per-host circuit breaker** — done 2026-06-10: 3 terminal failures opens the host for the run
 - [ ] FlareSolverr end-to-end validation against real Cloudflare-protected sites in CI
 - [ ] Playwright end-to-end validation for `js_required` detection on real CSR pages
 - [x] Locale-aware amount normalization — done 2026-06-10: `1.234,50` (EU) and `1,234.50` (US) via rightmost-separator rule, no locale detection needed
+- [ ] `--retry` second-pass flag — re-probe only the non-ok rows of a previous output CSV (deferred re-run instead of in-process standby)
+- [ ] `@pytest.mark.live` smoke tests against `httpbin.org` — excluded from CI, run manually
 
 ---
 
@@ -39,13 +48,16 @@ Published on TestPyPI. **162 tests passing, 93% coverage.**
 
 Target: data teams that do not want to manage a Python environment.
 
-- FastAPI wrapper with three endpoints:
-  - `POST /extract` — submit raw OCR text, receive structured JSONL
-  - `POST /sanitize` — submit a single line, receive a cleaned record with status
-  - `GET /jobs/{id}` — poll async extraction jobs for large files
-- API key authentication (header-based)
-- Hosted on Railway or Render
-- Pricing: usage-based tiers metered per 10K records
+- [x] FastAPI wrapper, scaffold shipped V4.2:
+  - [x] `POST /sanitize` — single line in, cleaned record with status out
+  - [x] `POST /extract` — raw OCR text in, structured records + audit out
+  - [x] `POST /extract/async` + `GET /jobs/{id}` — async jobs for large files
+  - [x] `GET /health` — unauthenticated liveness probe
+- [x] API key authentication (header-based, fail-closed)
+- [x] Dockerfile.api + docker-compose `api` service
+- [ ] Deploy to Railway or Render — needs hosting account
+- [ ] Usage metering + pricing tiers per 10K records
+- [ ] Redis-backed `JobStore` — required the moment a second instance runs behind a load balancer
 
 ---
 
