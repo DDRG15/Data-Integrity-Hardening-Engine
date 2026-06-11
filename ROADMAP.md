@@ -41,6 +41,8 @@ runnable HTTP API. Published on TestPyPI. **198 tests passing, 94% coverage.**
 - [x] Locale-aware amount normalization — done 2026-06-10: `1.234,50` (EU) and `1,234.50` (US) via rightmost-separator rule, no locale detection needed
 - [ ] `--retry` second-pass flag — re-probe only the non-ok rows of a previous output CSV (deferred re-run instead of in-process standby)
 - [ ] `@pytest.mark.live` smoke tests against `httpbin.org` — excluded from CI, run manually
+- [ ] **OCR correction audit trail** — corrections currently mutate IDs silently (`ASY-001` → `A5Y-001`, no trace). Add `id_raw` + `id_corrected` to every record where a fix fired, so a human reviews only the flagged rows, not the whole file. The mutation stays; the silence goes.
+- [ ] **Master-list reconciliation** — *blocked: requires a master ID catalog (none available yet).* Try raw → generate OCR-confusion candidates (S↔5, O↔0, l/I↔1) → exactly one catalog match wins; multiple or zero matches go to a human queue. Weighted fuzzy matching (S↔5 cheap, X↔7 expensive). Kills the ambiguity entirely — and doubles as a sales argument: "give me your catalog and the engine stops guessing."
 
 ---
 
@@ -80,3 +82,9 @@ Real-time streaming ingestion (Kafka, Kinesis) is not planned. The Tier 2 API is
 request-response. If stream processing becomes a requirement, it is a separate
 architectural decision affecting the storage layer, worker model, and billing model —
 treated as a distinct initiative, not a feature added to this engine.
+
+LLM-based OCR correction is not planned. Two reasons, both terminal: (1) client data
+may be private or regulated and must never leave the machine for an external LLM API;
+(2) determinism is this product's contract — the same input must always produce the
+same output, and an LLM cannot sign that. Correction stays rule-based; ambiguity
+resolution belongs to master-list reconciliation (see Tier 1), not to a model.
